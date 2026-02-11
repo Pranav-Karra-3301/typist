@@ -1,6 +1,9 @@
 name: release-beta
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       run_tests:
@@ -11,6 +14,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-beta-main
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -42,7 +49,7 @@ jobs:
         run: git fetch --tags --force
 
       - name: Run tests
-        if: inputs.run_tests
+        if: github.event_name != 'workflow_dispatch' || inputs.run_tests
         run: swift test
 
       - name: Resolve next release version

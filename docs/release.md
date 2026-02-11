@@ -77,8 +77,8 @@ Script controls (optional env vars):
 ## 5) Running a release
 
 1. Merge release-ready commits to `main`.
-2. Trigger workflow: **release-beta**.
-3. Keep `run_tests = true` unless intentionally skipping.
+2. Workflow **release-beta** runs automatically on every push to `main`.
+3. You can still run it manually with `workflow_dispatch` (and optional `run_tests` input).
 4. Workflow will:
    - compute next `v0.1.0-beta.N` version
    - build `.app` bundle and DMG

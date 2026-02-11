@@ -111,7 +111,7 @@ If you later enroll in Apple Developer Program, you can produce signed/notarized
 This repo includes GitHub Actions workflows for:
 
 - CI on PRs/pushes (`.github/workflows/ci.yml`)
-- Manual beta release publishing (`.github/workflows/release-beta.yml`)
+- Automatic beta release publishing from `main` (`.github/workflows/release-beta.yml`)
 - Styled DMG release assets (with optional signing/notarization)
 - Automatic Homebrew cask updates in a separate tap repo
 
