@@ -201,38 +201,29 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
     }
 
     private func snapshotSync(for timeframe: Timeframe, now: Date) throws -> StatsSnapshot {
+        if timeframe == .all {
+            return try snapshotFromAggregateTablesForAll()
+        }
+
         let granularity = timeframe == .all ? TimeBucketGranularity.day : timeframe.trendGranularity
-        let keyTable = granularity == .hour ? "hourly_key_counts" : "daily_key_counts"
-        let wordTable = granularity == .hour ? "hourly_word_counts" : "daily_word_counts"
         let keyRange = KeyboardKeyMapper.validKeyCodeRange
 
         let startDate = timeframe.startDate(now: now, calendar: calendar)
-        let startTimestamp: Int64?
-        if let startDate {
-            startTimestamp = Int64(TimeBucket.start(of: startDate, granularity: granularity, calendar: calendar).timeIntervalSince1970)
-        } else {
-            startTimestamp = nil
-        }
-
+        let startTimestamp = startDate.map { Int64($0.timeIntervalSince1970) }
         let keyCodePredicate = "key_code >= \(keyRange.lowerBound) AND key_code <= \(keyRange.upperBound)"
-        let keyFilterClause = startTimestamp == nil
+        let eventFilterClause = startTimestamp == nil
             ? " WHERE \(keyCodePredicate)"
-            : " WHERE bucket_start >= ? AND \(keyCodePredicate)"
-        let wordFilterClause = startTimestamp == nil ? "" : " WHERE bucket_start >= ?"
+            : " WHERE ts >= ? AND \(keyCodePredicate)"
         let bindings = startTimestamp.map { [SQLiteBinding.int64($0)] } ?? []
 
         let totalKeys = try querySingleInt(
-            "SELECT COALESCE(SUM(count), 0) FROM \(keyTable)\(keyFilterClause);",
+            "SELECT COUNT(*) FROM event_ring_buffer\(eventFilterClause);",
             bindings: bindings
         )
-
-        let totalWords = try querySingleInt(
-            "SELECT COALESCE(SUM(count), 0) FROM \(wordTable)\(wordFilterClause);",
-            bindings: bindings
-        )
+        let totalWords = try wordCountFromEventRing(startTimestamp: startTimestamp, keyCodeRange: keyRange)
 
         let breakdownRows = try queryRows(
-            "SELECT device_class, COALESCE(SUM(count), 0) FROM \(keyTable)\(keyFilterClause) GROUP BY device_class;",
+            "SELECT device_class, COUNT(*) FROM event_ring_buffer\(eventFilterClause) GROUP BY device_class;",
             bindings: bindings
         )
 
@@ -253,11 +244,11 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
 
         let keyDistributionRows = try queryRows(
             """
-            SELECT key_code, COALESCE(SUM(count), 0) AS c
-            FROM \(keyTable)
-            \(keyFilterClause)
+            SELECT key_code, COUNT(*) AS c
+            FROM event_ring_buffer
+            \(eventFilterClause)
             GROUP BY key_code
-            ORDER BY c DESC
+            ORDER BY c DESC, key_code ASC
             """,
             bindings: bindings
         )
@@ -271,11 +262,12 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         }
         let topKeys = Array(keyDistribution.prefix(8))
 
+        let bucketSeconds = granularity == .hour ? 3600 : 86_400
         let trendRows = try queryRows(
             """
-            SELECT bucket_start, COALESCE(SUM(count), 0)
-            FROM \(keyTable)
-            \(keyFilterClause)
+            SELECT (ts / \(bucketSeconds)) * \(bucketSeconds) AS bucket_start, COUNT(*)
+            FROM event_ring_buffer
+            \(eventFilterClause)
             GROUP BY bucket_start
             ORDER BY bucket_start ASC;
             """,
@@ -305,6 +297,143 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             topKeys: topKeys,
             trendSeries: trendSeries
         )
+    }
+
+    private func snapshotFromAggregateTablesForAll() throws -> StatsSnapshot {
+        let keyRange = KeyboardKeyMapper.validKeyCodeRange
+        let keyCodePredicate = "key_code >= \(keyRange.lowerBound) AND key_code <= \(keyRange.upperBound)"
+
+        let totalKeys = try querySingleInt(
+            "SELECT COALESCE(SUM(count), 0) FROM daily_key_counts WHERE \(keyCodePredicate);",
+            bindings: []
+        )
+        let totalWords = try querySingleInt(
+            "SELECT COALESCE(SUM(count), 0) FROM daily_word_counts;",
+            bindings: []
+        )
+
+        let breakdownRows = try queryRows(
+            "SELECT device_class, COALESCE(SUM(count), 0) FROM daily_key_counts WHERE \(keyCodePredicate) GROUP BY device_class;",
+            bindings: []
+        )
+
+        var builtIn = 0
+        var external = 0
+        var unknown = 0
+        for row in breakdownRows where row.count >= 2 {
+            let device = row[0].textValue
+            let count = row[1].intValue
+            switch device {
+            case DeviceClass.builtIn.rawValue: builtIn = count
+            case DeviceClass.external.rawValue: external = count
+            default: unknown = count
+            }
+        }
+
+        let keyDistributionRows = try queryRows(
+            """
+            SELECT key_code, COALESCE(SUM(count), 0) AS c
+            FROM daily_key_counts
+            WHERE \(keyCodePredicate)
+            GROUP BY key_code
+            ORDER BY c DESC, key_code ASC
+            """,
+            bindings: []
+        )
+
+        let keyDistribution = keyDistributionRows.compactMap { row -> TopKeyStat? in
+            guard row.count >= 2 else { return nil }
+            let keyCode = row[0].intValue
+            let count = row[1].intValue
+            guard count > 0 else { return nil }
+            return TopKeyStat(keyCode: keyCode, keyName: KeyboardKeyMapper.displayName(for: keyCode), count: count)
+        }
+
+        let trendRows = try queryRows(
+            """
+            SELECT bucket_start, COALESCE(SUM(count), 0)
+            FROM daily_key_counts
+            WHERE \(keyCodePredicate)
+            GROUP BY bucket_start
+            ORDER BY bucket_start ASC;
+            """,
+            bindings: []
+        )
+
+        let trendSeries = trendRows.compactMap { row -> TrendPoint? in
+            guard row.count >= 2 else { return nil }
+            let ts = row[0].intValue
+            let count = row[1].intValue
+            return TrendPoint(bucketStart: Date(timeIntervalSince1970: TimeInterval(ts)), count: count)
+        }
+
+        return StatsSnapshot(
+            timeframe: .all,
+            totalKeystrokes: totalKeys,
+            totalWords: totalWords,
+            deviceBreakdown: DeviceBreakdown(builtIn: builtIn, external: external, unknown: unknown),
+            keyDistribution: keyDistribution,
+            topKeys: Array(keyDistribution.prefix(8)),
+            trendSeries: trendSeries
+        )
+    }
+
+    private func wordCountFromEventRing(startTimestamp: Int64?, keyCodeRange: ClosedRange<Int>) throws -> Int {
+        var inWord = false
+        if let startTimestamp {
+            let priorRows = try queryRows(
+                """
+                SELECT key_code
+                FROM event_ring_buffer
+                WHERE ts < ? AND key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
+                ORDER BY ts DESC, rowid DESC
+                LIMIT 1;
+                """,
+                bindings: [.int64(startTimestamp)]
+            )
+
+            if let priorKeyCode = priorRows.first?.first?.intValue {
+                inWord = !KeyboardKeyMapper.isSeparator(priorKeyCode)
+            }
+        }
+
+        let eventRows: [[SQLiteValue]]
+        if let startTimestamp {
+            eventRows = try queryRows(
+                """
+                SELECT key_code
+                FROM event_ring_buffer
+                WHERE ts >= ? AND key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
+                ORDER BY ts ASC, rowid ASC;
+                """,
+                bindings: [.int64(startTimestamp)]
+            )
+        } else {
+            eventRows = try queryRows(
+                """
+                SELECT key_code
+                FROM event_ring_buffer
+                WHERE key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
+                ORDER BY ts ASC, rowid ASC;
+                """,
+                bindings: []
+            )
+        }
+
+        var words = 0
+        for row in eventRows where !row.isEmpty {
+            let keyCode = row[0].intValue
+            if KeyboardKeyMapper.isSeparator(keyCode) {
+                if inWord {
+                    words += 1
+                    inWord = false
+                }
+            } else {
+                inWord = true
+            }
+        }
+
+        return words
     }
 
     private func createSchema() throws {

@@ -15,6 +15,7 @@ final class HIDKeyboardCaptureService: KeyboardCaptureProviding {
     private let deviceClassifier = DeviceClassifier()
     private let diagnostics = AppDiagnostics.shared
     private var manager: IOHIDManager?
+    private let runLoopMode = CFRunLoopMode.commonModes.rawValue
 
     init() {
         var localContinuation: AsyncStream<KeyEvent>.Continuation!
@@ -46,7 +47,7 @@ final class HIDKeyboardCaptureService: KeyboardCaptureProviding {
 
         let context = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
         IOHIDManagerRegisterInputValueCallback(newManager, hidInputCallback, context)
-        IOHIDManagerScheduleWithRunLoop(newManager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerScheduleWithRunLoop(newManager, CFRunLoopGetMain(), runLoopMode)
 
         let result = IOHIDManagerOpen(newManager, IOOptionBits(kIOHIDOptionsTypeNone))
         guard result == kIOReturnSuccess else {
@@ -60,7 +61,7 @@ final class HIDKeyboardCaptureService: KeyboardCaptureProviding {
     func stop() {
         guard let manager else { return }
 
-        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), runLoopMode)
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.manager = nil
         diagnostics.mark("HID capture service stopped")
