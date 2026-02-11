@@ -59,6 +59,7 @@ struct MenuPopoverView: View {
             HStack(spacing: 10) {
                 summaryMetric(title: "Keystrokes", value: formatCount(appModel.snapshot.totalKeystrokes))
                 summaryMetric(title: "Words", value: formatCount(appModel.snapshot.totalWords))
+                summaryMetric(title: "Flow WPM", value: String(format: "%.1f", appModel.snapshot.flowWPM))
             }
         }
     }
@@ -87,19 +88,60 @@ struct MenuPopoverView: View {
             infoRow(label: "Built-in", value: "\(formatCount(breakdown.builtIn)) • \(Int((Double(breakdown.builtIn) / Double(total) * 100).rounded()))%")
             infoRow(label: "External", value: "\(formatCount(breakdown.external)) • \(Int((Double(breakdown.external) / Double(total) * 100).rounded()))%")
             infoRow(label: "Unknown", value: "\(formatCount(breakdown.unknown)) • \(Int((Double(breakdown.unknown) / Double(total) * 100).rounded()))%")
+
+            if appModel.snapshot.pasteEvents > 0 {
+                Divider().overlay(Color.white.opacity(0.08))
+
+                Text("Paste activity")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+
+                infoRow(label: "Paste events", value: formatCount(appModel.snapshot.pasteEvents))
+                infoRow(label: "Pasted words (est.)", value: formatCount(appModel.snapshot.pastedWordsEst))
+                infoRow(label: "Assisted WPM", value: String(format: "%.1f", appModel.snapshot.assistedWPM))
+            }
         }
     }
 
     private var typingSpeedSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Typing speed")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.86))
+            HStack(spacing: 6) {
+                Text("Typing speed")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+                Text("BETA")
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
+            }
 
             TypingSpeedChartView(
                 timeframe: appModel.snapshot.timeframe,
                 points: appModel.snapshot.typingSpeedTrendSeries
             )
+
+            if appModel.snapshot.flowWPM > 0 || appModel.snapshot.skillWPM > 0 {
+                HStack(spacing: 16) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.green.opacity(0.82))
+                            .frame(width: 6, height: 6)
+                        Text("Flow: \(String(format: "%.1f", appModel.snapshot.flowWPM)) WPM")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.66))
+                    }
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.blue.opacity(0.72))
+                            .frame(width: 6, height: 6)
+                        Text("Skill: \(String(format: "%.1f", appModel.snapshot.skillWPM)) WPM")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.66))
+                    }
+                }
+            }
         }
     }
 

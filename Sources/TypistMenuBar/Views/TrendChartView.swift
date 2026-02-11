@@ -48,12 +48,20 @@ struct TrendChartView: View {
             }
             .chartLegend(.hidden)
             .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 4))
+                AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(date, format: TypingSpeedChartView.axisDateFormat(for: timeframe))
+                                .font(.system(size: 9, design: .rounded))
+                        }
+                    }
+                }
             }
             .chartYAxis {
                 AxisMarks(position: .trailing)
             }
-            .chartXAxisLabel(position: .bottom, alignment: .leading) {}
             .chartYAxisLabel(position: .trailing, alignment: .top) {
                 Text(rateLabel)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))

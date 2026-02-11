@@ -80,3 +80,14 @@ Use **Copy Debug** to copy a full diagnostics report (pipeline counters + recent
 1. Open package in Xcode.
 2. Archive with a Developer ID signing identity.
 3. Notarize and staple the app bundle.
+
+## Automated beta releases (`0.1.x`)
+
+This repo includes GitHub Actions workflows for:
+
+- CI on PRs/pushes (`.github/workflows/ci.yml`)
+- Manual beta release publishing (`.github/workflows/release-beta.yml`)
+- Signed + notarized DMG release assets
+- Automatic Homebrew cask updates in a separate tap repo
+
+See `docs/release.md` for full setup (required secrets/variables, tap repo wiring, and release runbook).

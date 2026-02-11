@@ -7,15 +7,16 @@ struct TypingSpeedChartView: View {
     let points: [TypingSpeedTrendPoint]
 
     private var hasData: Bool {
-        points.contains { $0.wpm > 0 }
+        points.contains { $0.flowWPM > 0 }
     }
 
-    private var averageWPM: Double {
-        let validPoints = points.filter { $0.activeSeconds > 0 }
+    private var averageFlowWPM: Double {
+        let validPoints = points.filter { $0.activeSecondsFlow > 0 }
         guard !validPoints.isEmpty else { return 0 }
         let totalWords = validPoints.reduce(0) { $0 + $1.words }
-        let totalSeconds = validPoints.reduce(0.0) { $0 + $1.activeSeconds }
-        return totalSeconds > 0 ? Double(totalWords) / (totalSeconds / 60.0) : 0
+        let totalSeconds = validPoints.reduce(0.0) { $0 + $1.activeSecondsFlow }
+        guard totalSeconds >= 5 else { return 0 }
+        return min(Double(totalWords) / (totalSeconds / 60.0), 200)
     }
 
     var body: some View {
@@ -31,7 +32,7 @@ struct TypingSpeedChartView: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Avg: \(Int(averageWPM.rounded())) WPM")
+                    Text("Avg Flow: \(Int(averageFlowWPM.rounded())) WPM")
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.6))
                     Spacer()
@@ -40,7 +41,7 @@ struct TypingSpeedChartView: View {
                 Chart(points) { point in
                     AreaMark(
                         x: .value("Time", point.bucketStart),
-                        y: .value("WPM", point.wpm)
+                        y: .value("Flow WPM", point.flowWPM)
                     )
                     .foregroundStyle(
                         LinearGradient(
@@ -52,7 +53,7 @@ struct TypingSpeedChartView: View {
 
                     LineMark(
                         x: .value("Time", point.bucketStart),
-                        y: .value("WPM", point.wpm)
+                        y: .value("Flow WPM", point.flowWPM)
                     )
                     .foregroundStyle(Color.green.opacity(0.82))
                     .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -60,12 +61,20 @@ struct TypingSpeedChartView: View {
                 }
                 .chartLegend(.hidden)
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 4))
+                    AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel {
+                            if let date = value.as(Date.self) {
+                                Text(date, format: Self.axisDateFormat(for: timeframe))
+                                    .font(.system(size: 9, design: .rounded))
+                            }
+                        }
+                    }
                 }
                 .chartYAxis {
                     AxisMarks(position: .trailing)
                 }
-                .chartXAxisLabel(position: .bottom, alignment: .leading) {}
                 .chartYAxisLabel(position: .trailing, alignment: .top) {
                     Text("WPM")
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -73,6 +82,21 @@ struct TypingSpeedChartView: View {
                 }
                 .frame(height: 76)
             }
+        }
+    }
+
+    static func axisDateFormat(for timeframe: Timeframe) -> Date.FormatStyle {
+        switch timeframe {
+        case .h1:
+            return .dateTime.hour().minute()
+        case .h12, .h24:
+            return .dateTime.hour()
+        case .d7:
+            return .dateTime.weekday(.abbreviated)
+        case .d30:
+            return .dateTime.month(.abbreviated).day()
+        case .all:
+            return .dateTime.month(.abbreviated).year(.twoDigits)
         }
     }
 }

@@ -99,13 +99,18 @@ final class HIDKeyboardCaptureService: KeyboardCaptureProviding {
         let deviceClass = deviceClassifier.classify(device: device)
         let frontmostApp = currentFrontmostApp()
 
+        // Detect Cmd+V paste chord: keyCode 25 is "V" in HID usage tables.
+        let isPaste = keyCode == 25 && NSEvent.modifierFlags.contains(.command)
+
         let event = KeyEvent(
             timestamp: Date(),
             keyCode: keyCode,
             isSeparator: KeyboardKeyMapper.isSeparator(keyCode),
             deviceClass: deviceClass,
             appBundleID: frontmostApp.bundleID,
-            appName: frontmostApp.name
+            appName: frontmostApp.name,
+            monotonicTime: ProcessInfo.processInfo.systemUptime,
+            isPasteChord: isPaste
         )
 
         diagnostics.recordHIDYieldedEvent(event)
