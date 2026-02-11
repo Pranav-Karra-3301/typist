@@ -17,7 +17,12 @@ public actor MetricsEngine {
     private var pendingActiveFlowByBucket: [Date: Double] = [:]
     private var pendingActiveSkillByBucket: [Date: Double] = [:]
     private var pendingSessionData: [SessionFlushData] = []
-    // Aggregate session metrics for snapshot merging
+    // Per-bucket session metrics
+    private var pendingTypedWordsByBucket: [Date: Int] = [:]
+    private var pendingPastedWordsByBucket: [Date: Int] = [:]
+    private var pendingPasteEventsByBucket: [Date: Int] = [:]
+    private var pendingEditEventsByBucket: [Date: Int] = [:]
+    // Running totals for pending (unflushed) data only — reset on flush
     private var pendingTypedWords: Int = 0
     private var pendingPastedWordsEst: Int = 0
     private var pendingPasteEvents: Int = 0
@@ -96,6 +101,10 @@ public actor MetricsEngine {
         pendingActiveFlowByBucket.removeAll(keepingCapacity: false)
         pendingActiveSkillByBucket.removeAll(keepingCapacity: false)
         pendingSessionData.removeAll(keepingCapacity: false)
+        pendingTypedWordsByBucket.removeAll(keepingCapacity: false)
+        pendingPastedWordsByBucket.removeAll(keepingCapacity: false)
+        pendingPasteEventsByBucket.removeAll(keepingCapacity: false)
+        pendingEditEventsByBucket.removeAll(keepingCapacity: false)
         pendingTypedWords = 0
         pendingPastedWordsEst = 0
         pendingPasteEvents = 0
@@ -166,11 +175,14 @@ public actor MetricsEngine {
         _ = wordCounters[appID]!.process(event: event)
 
         if wordCommitted {
+            let hourBucket = TimeBucket.startOfHour(for: event.timestamp)
             if isPaste {
                 pendingPastedWordsEst += 1
+                pendingPastedWordsByBucket[hourBucket, default: 0] += 1
                 sessions[appID]?.pastedWordsEst += 1
             } else {
                 pendingTypedWords += 1
+                pendingTypedWordsByBucket[hourBucket, default: 0] += 1
                 sessions[appID]?.typedWords += 1
             }
 
@@ -194,13 +206,17 @@ public actor MetricsEngine {
         }
         lastKeystrokeTime = event.timestamp
 
-        // Track paste and edit events
+        // Track paste and edit events (total + per-bucket)
         if isPaste {
+            let hourBucket = TimeBucket.startOfHour(for: event.timestamp)
             pendingPasteEvents += 1
+            pendingPasteEventsByBucket[hourBucket, default: 0] += 1
             sessions[appID]?.pasteEvents += 1
         }
         if isDelete {
+            let hourBucket = TimeBucket.startOfHour(for: event.timestamp)
             pendingEditEvents += 1
+            pendingEditEventsByBucket[hourBucket, default: 0] += 1
             sessions[appID]?.editEvents += 1
         }
 
@@ -595,12 +611,26 @@ public actor MetricsEngine {
 
         let events = pendingEvents
         let wordIncrements = pendingWordIncrements
-        let activeTypingIncrements = pendingActiveTypingByBucket.map { bucket, seconds in
+
+        // Collect all buckets that have any data
+        let allBuckets = Set(pendingActiveTypingByBucket.keys)
+            .union(pendingActiveFlowByBucket.keys)
+            .union(pendingActiveSkillByBucket.keys)
+            .union(pendingTypedWordsByBucket.keys)
+            .union(pendingPastedWordsByBucket.keys)
+            .union(pendingPasteEventsByBucket.keys)
+            .union(pendingEditEventsByBucket.keys)
+
+        let activeTypingIncrements = allBuckets.map { bucket in
             ActiveTypingIncrement(
                 bucketStart: bucket,
-                activeSeconds: seconds,
-                activeSecondsFlow: pendingActiveFlowByBucket[bucket] ?? seconds,
-                activeSecondsSkill: pendingActiveSkillByBucket[bucket] ?? seconds
+                activeSeconds: pendingActiveTypingByBucket[bucket] ?? 0,
+                activeSecondsFlow: pendingActiveFlowByBucket[bucket] ?? pendingActiveTypingByBucket[bucket] ?? 0,
+                activeSecondsSkill: pendingActiveSkillByBucket[bucket] ?? pendingActiveTypingByBucket[bucket] ?? 0,
+                typedWords: pendingTypedWordsByBucket[bucket] ?? 0,
+                pastedWordsEst: pendingPastedWordsByBucket[bucket] ?? 0,
+                pasteEvents: pendingPasteEventsByBucket[bucket] ?? 0,
+                editEvents: pendingEditEventsByBucket[bucket] ?? 0
             )
         }
         let sessionData = pendingSessionData
@@ -621,7 +651,16 @@ public actor MetricsEngine {
         pendingActiveFlowByBucket.removeAll(keepingCapacity: true)
         pendingActiveSkillByBucket.removeAll(keepingCapacity: true)
         pendingSessionData.removeAll(keepingCapacity: true)
-        // Note: we don't reset pending aggregate counters (typedWords, etc.) here
-        // because those are accumulated over the full lifetime and merged in snapshot()
+        pendingTypedWordsByBucket.removeAll(keepingCapacity: true)
+        pendingPastedWordsByBucket.removeAll(keepingCapacity: true)
+        pendingPasteEventsByBucket.removeAll(keepingCapacity: true)
+        pendingEditEventsByBucket.removeAll(keepingCapacity: true)
+        // Reset aggregate counters — data is now persisted to DB
+        pendingTypedWords = 0
+        pendingPastedWordsEst = 0
+        pendingPasteEvents = 0
+        pendingEditEvents = 0
+        pendingActiveSecondsFlow = 0
+        pendingActiveSecondsSkill = 0
     }
 }

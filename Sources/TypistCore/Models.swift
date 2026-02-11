@@ -315,12 +315,29 @@ public struct ActiveTypingIncrement: Sendable, Hashable {
     public let activeSeconds: Double
     public let activeSecondsFlow: Double
     public let activeSecondsSkill: Double
+    public let typedWords: Int
+    public let pastedWordsEst: Int
+    public let pasteEvents: Int
+    public let editEvents: Int
 
-    public init(bucketStart: Date, activeSeconds: Double, activeSecondsFlow: Double = 0, activeSecondsSkill: Double = 0) {
+    public init(
+        bucketStart: Date,
+        activeSeconds: Double,
+        activeSecondsFlow: Double = 0,
+        activeSecondsSkill: Double = 0,
+        typedWords: Int = 0,
+        pastedWordsEst: Int = 0,
+        pasteEvents: Int = 0,
+        editEvents: Int = 0
+    ) {
         self.bucketStart = bucketStart
         self.activeSeconds = activeSeconds
         self.activeSecondsFlow = activeSecondsFlow > 0 ? activeSecondsFlow : activeSeconds
         self.activeSecondsSkill = activeSecondsSkill > 0 ? activeSecondsSkill : activeSeconds
+        self.typedWords = typedWords
+        self.pastedWordsEst = pastedWordsEst
+        self.pasteEvents = pasteEvents
+        self.editEvents = editEvents
     }
 }
 
@@ -383,21 +400,25 @@ public struct StatsSnapshot: Sendable, Hashable {
     public var topAppsByWords: [AppWordStat]
 
     /// Flow WPM: typed_words / (active_seconds_flow / 60). Includes short think pauses.
+    /// Falls back to totalWords when typed_words is unavailable (pre-migration data).
     public var flowWPM: Double {
-        guard activeSecondsFlow >= 5 else { return 0 }
-        return min(Double(typedWords) / (activeSecondsFlow / 60.0), 200)
+        guard activeSecondsFlow > 0 else { return 0 }
+        let words = typedWords > 0 ? typedWords : totalWords
+        return min(Double(words) / (activeSecondsFlow / 60.0), 200)
     }
 
     /// Skill WPM: typed_words / (active_seconds_skill / 60). Finger speed only.
     public var skillWPM: Double {
-        guard activeSecondsSkill >= 5 else { return 0 }
-        return min(Double(typedWords) / (activeSecondsSkill / 60.0), 300)
+        guard activeSecondsSkill > 0 else { return 0 }
+        let words = typedWords > 0 ? typedWords : totalWords
+        return min(Double(words) / (activeSecondsSkill / 60.0), 300)
     }
 
     /// Assisted WPM: includes paste-estimated words in flow time.
     public var assistedWPM: Double {
-        guard activeSecondsFlow >= 5 else { return 0 }
-        return min(Double(typedWords + pastedWordsEst) / (activeSecondsFlow / 60.0), 200)
+        guard activeSecondsFlow > 0 else { return 0 }
+        let words = typedWords > 0 ? (typedWords + pastedWordsEst) : totalWords
+        return min(Double(words) / (activeSecondsFlow / 60.0), 200)
     }
 
     /// Edit ratio: deleted_events / total_events (approximate).

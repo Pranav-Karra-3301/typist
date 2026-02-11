@@ -251,13 +251,21 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 wordCountByHour[hourStart, default: 0] += 1
             }
 
-            // Aggregate active typing by hour and day buckets (including flow/skill)
+            // Aggregate active typing by hour and day buckets (including flow/skill and session metrics)
             var activeSecondsByHour: [Int64: Double] = [:]
             var activeSecondsByDay: [Int64: Double] = [:]
             var flowSecondsByHour: [Int64: Double] = [:]
             var flowSecondsByDay: [Int64: Double] = [:]
             var skillSecondsByHour: [Int64: Double] = [:]
             var skillSecondsByDay: [Int64: Double] = [:]
+            var typedWordsByHour: [Int64: Int] = [:]
+            var typedWordsByDay: [Int64: Int] = [:]
+            var pastedWordsByHour: [Int64: Int] = [:]
+            var pastedWordsByDay: [Int64: Int] = [:]
+            var pasteEventsByHour: [Int64: Int] = [:]
+            var pasteEventsByDay: [Int64: Int] = [:]
+            var editEventsByHour: [Int64: Int] = [:]
+            var editEventsByDay: [Int64: Int] = [:]
             for increment in activeTypingIncrements {
                 let hourStart = Int64(increment.bucketStart.timeIntervalSince1970)
                 let dayStart = Int64(TimeBucket.startOfDay(for: increment.bucketStart, calendar: calendar).timeIntervalSince1970)
@@ -266,33 +274,44 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 flowSecondsByHour[hourStart, default: 0] += increment.activeSecondsFlow
                 flowSecondsByDay[dayStart, default: 0] += increment.activeSecondsFlow
                 skillSecondsByHour[hourStart, default: 0] += increment.activeSecondsSkill
+                typedWordsByHour[hourStart, default: 0] += increment.typedWords
+                typedWordsByDay[dayStart, default: 0] += increment.typedWords
+                pastedWordsByHour[hourStart, default: 0] += increment.pastedWordsEst
+                pastedWordsByDay[dayStart, default: 0] += increment.pastedWordsEst
+                pasteEventsByHour[hourStart, default: 0] += increment.pasteEvents
+                pasteEventsByDay[dayStart, default: 0] += increment.pasteEvents
+                editEventsByHour[hourStart, default: 0] += increment.editEvents
+                editEventsByDay[dayStart, default: 0] += increment.editEvents
                 skillSecondsByDay[dayStart, default: 0] += increment.activeSecondsSkill
             }
 
+            // Collect all hourly buckets that have any data
+            let allHourBuckets = Set(activeSecondsByHour.keys)
+                .union(wordCountByHour.keys)
+                .union(typedWordsByHour.keys)
+                .union(pastedWordsByHour.keys)
+                .union(pasteEventsByHour.keys)
+                .union(editEventsByHour.keys)
+
             // Upsert hourly typing stats
-            for (hourStart, seconds) in activeSecondsByHour {
+            for hourStart in allHourBuckets {
                 let words = wordCountByHour[hourStart, default: 0]
+                let seconds = activeSecondsByHour[hourStart, default: 0]
                 let flow = flowSecondsByHour[hourStart, default: 0]
                 let skill = skillSecondsByHour[hourStart, default: 0]
+                let tw = typedWordsByHour[hourStart, default: 0]
+                let pw = pastedWordsByHour[hourStart, default: 0]
+                let pe = pasteEventsByHour[hourStart, default: 0]
+                let ee = editEventsByHour[hourStart, default: 0]
                 try execute(
                     """
-                    INSERT INTO hourly_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill)
-                    VALUES(\(hourStart), \(words), \(seconds), \(flow), \(skill))
+                    INSERT INTO hourly_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill, typed_words, pasted_words_est, paste_events, edit_events)
+                    VALUES(\(hourStart), \(words), \(seconds), \(flow), \(skill), \(tw), \(pw), \(pe), \(ee))
                     ON CONFLICT(bucket_start)
                     DO UPDATE SET word_count = word_count + \(words), active_seconds = active_seconds + \(seconds),
-                    active_seconds_flow = active_seconds_flow + \(flow), active_seconds_skill = active_seconds_skill + \(skill);
-                    """
-                )
-            }
-
-            // Also update hourly stats for word counts without active seconds
-            for (hourStart, words) in wordCountByHour where activeSecondsByHour[hourStart] == nil {
-                try execute(
-                    """
-                    INSERT INTO hourly_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill)
-                    VALUES(\(hourStart), \(words), 0, 0, 0)
-                    ON CONFLICT(bucket_start)
-                    DO UPDATE SET word_count = word_count + \(words);
+                    active_seconds_flow = active_seconds_flow + \(flow), active_seconds_skill = active_seconds_skill + \(skill),
+                    typed_words = typed_words + \(tw), pasted_words_est = pasted_words_est + \(pw),
+                    paste_events = paste_events + \(pe), edit_events = edit_events + \(ee);
                     """
                 )
             }
@@ -304,30 +323,33 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 wordCountByDay[dayStart, default: 0] += 1
             }
 
+            // Collect all daily buckets that have any data
+            let allDayBuckets = Set(activeSecondsByDay.keys)
+                .union(wordCountByDay.keys)
+                .union(typedWordsByDay.keys)
+                .union(pastedWordsByDay.keys)
+                .union(pasteEventsByDay.keys)
+                .union(editEventsByDay.keys)
+
             // Upsert daily typing stats
-            for (dayStart, seconds) in activeSecondsByDay {
+            for dayStart in allDayBuckets {
                 let words = wordCountByDay[dayStart, default: 0]
+                let seconds = activeSecondsByDay[dayStart, default: 0]
                 let flow = flowSecondsByDay[dayStart, default: 0]
                 let skill = skillSecondsByDay[dayStart, default: 0]
+                let tw = typedWordsByDay[dayStart, default: 0]
+                let pw = pastedWordsByDay[dayStart, default: 0]
+                let pe = pasteEventsByDay[dayStart, default: 0]
+                let ee = editEventsByDay[dayStart, default: 0]
                 try execute(
                     """
-                    INSERT INTO daily_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill)
-                    VALUES(\(dayStart), \(words), \(seconds), \(flow), \(skill))
+                    INSERT INTO daily_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill, typed_words, pasted_words_est, paste_events, edit_events)
+                    VALUES(\(dayStart), \(words), \(seconds), \(flow), \(skill), \(tw), \(pw), \(pe), \(ee))
                     ON CONFLICT(bucket_start)
                     DO UPDATE SET word_count = word_count + \(words), active_seconds = active_seconds + \(seconds),
-                    active_seconds_flow = active_seconds_flow + \(flow), active_seconds_skill = active_seconds_skill + \(skill);
-                    """
-                )
-            }
-
-            // Also update daily stats for word counts without active seconds
-            for (dayStart, words) in wordCountByDay where activeSecondsByDay[dayStart] == nil {
-                try execute(
-                    """
-                    INSERT INTO daily_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill)
-                    VALUES(\(dayStart), \(words), 0, 0, 0)
-                    ON CONFLICT(bucket_start)
-                    DO UPDATE SET word_count = word_count + \(words);
+                    active_seconds_flow = active_seconds_flow + \(flow), active_seconds_skill = active_seconds_skill + \(skill),
+                    typed_words = typed_words + \(tw), pasted_words_est = pasted_words_est + \(pw),
+                    paste_events = paste_events + \(pe), edit_events = edit_events + \(ee);
                     """
                 )
             }
@@ -516,19 +538,24 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                    COALESCE(SUM(typed_words), 0),
                    COALESCE(SUM(pasted_words_est), 0),
                    COALESCE(SUM(paste_events), 0),
-                   COALESCE(SUM(edit_events), 0)
+                   COALESCE(SUM(edit_events), 0),
+                   COALESCE(SUM(word_count), 0)
             FROM \(tableName)
             \(filterClause);
             """,
             bindings: bindings
         )
 
-        guard let row = rows.first, row.count >= 6 else {
+        guard let row = rows.first, row.count >= 7 else {
             return SessionAggregates()
         }
 
+        let typedWords = row[2].intValue
+        let wordCount = row[6].intValue
+
         return SessionAggregates(
-            typedWords: row[2].intValue,
+            // Fall back to word_count when typed_words is 0 (pre-migration data)
+            typedWords: typedWords > 0 ? typedWords : wordCount,
             pastedWordsEst: row[3].intValue,
             pasteEvents: row[4].intValue,
             editEvents: row[5].intValue,
