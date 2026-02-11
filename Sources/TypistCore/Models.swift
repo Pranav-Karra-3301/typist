@@ -12,6 +12,7 @@ public enum TimeBucketGranularity: Sendable {
 }
 
 public enum Timeframe: String, CaseIterable, Sendable {
+    case h1
     case h12
     case h24
     case d7
@@ -20,6 +21,7 @@ public enum Timeframe: String, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
+        case .h1: return "1H"
         case .h12: return "12H"
         case .h24: return "24H"
         case .d7: return "7D"
@@ -30,7 +32,7 @@ public enum Timeframe: String, CaseIterable, Sendable {
 
     public var trendGranularity: TimeBucketGranularity {
         switch self {
-        case .h12, .h24:
+        case .h1, .h12, .h24:
             return .hour
         case .d7, .d30, .all:
             return .day
@@ -39,6 +41,8 @@ public enum Timeframe: String, CaseIterable, Sendable {
 
     public func startDate(now: Date, calendar: Calendar = .current) -> Date? {
         switch self {
+        case .h1:
+            return calendar.date(byAdding: .hour, value: -1, to: now)
         case .h12:
             return calendar.date(byAdding: .hour, value: -12, to: now)
         case .h24:
@@ -149,6 +153,7 @@ public struct StatsSnapshot: Sendable, Hashable {
     public var totalKeystrokes: Int
     public var totalWords: Int
     public var deviceBreakdown: DeviceBreakdown
+    public var keyDistribution: [TopKeyStat]
     public var topKeys: [TopKeyStat]
     public var trendSeries: [TrendPoint]
 
@@ -157,6 +162,7 @@ public struct StatsSnapshot: Sendable, Hashable {
         totalKeystrokes: Int,
         totalWords: Int,
         deviceBreakdown: DeviceBreakdown,
+        keyDistribution: [TopKeyStat],
         topKeys: [TopKeyStat],
         trendSeries: [TrendPoint]
     ) {
@@ -164,6 +170,7 @@ public struct StatsSnapshot: Sendable, Hashable {
         self.totalKeystrokes = totalKeystrokes
         self.totalWords = totalWords
         self.deviceBreakdown = deviceBreakdown
+        self.keyDistribution = keyDistribution
         self.topKeys = topKeys
         self.trendSeries = trendSeries
     }
@@ -174,6 +181,7 @@ public struct StatsSnapshot: Sendable, Hashable {
             totalKeystrokes: 0,
             totalWords: 0,
             deviceBreakdown: DeviceBreakdown(builtIn: 0, external: 0, unknown: 0),
+            keyDistribution: [],
             topKeys: [],
             trendSeries: []
         )

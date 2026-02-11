@@ -136,6 +136,21 @@ public actor MetricsEngine {
 
         snapshot.deviceBreakdown = DeviceBreakdown(builtIn: builtIn, external: external, unknown: unknown)
 
+        var keyCounts = Dictionary(uniqueKeysWithValues: snapshot.keyDistribution.map { ($0.keyCode, $0.count) })
+        for event in filteredEvents where KeyboardKeyMapper.isTrackableKeyCode(event.keyCode) {
+            keyCounts[event.keyCode, default: 0] += 1
+        }
+
+        snapshot.keyDistribution = keyCounts
+            .map { keyCode, count in
+                TopKeyStat(keyCode: keyCode, keyName: KeyboardKeyMapper.displayName(for: keyCode), count: count)
+            }
+            .sorted {
+                if $0.count == $1.count { return $0.keyCode < $1.keyCode }
+                return $0.count > $1.count
+            }
+        snapshot.topKeys = Array(snapshot.keyDistribution.prefix(8))
+
         let granularity = timeframe.trendGranularity
         var trendMap = Dictionary(uniqueKeysWithValues: snapshot.trendSeries.map { ($0.bucketStart, $0.count) })
 

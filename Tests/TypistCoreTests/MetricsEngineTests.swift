@@ -26,6 +26,8 @@ final class MetricsEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.totalWords, 2)
         XCTAssertEqual(snapshot.deviceBreakdown.builtIn, 2)
         XCTAssertEqual(snapshot.deviceBreakdown.external, 2)
+        XCTAssertEqual(snapshot.keyDistribution.first?.keyCode, 44)
+        XCTAssertEqual(snapshot.keyDistribution.first?.count, 2)
     }
 
     func testFlushTriggeredAtThreshold() async throws {

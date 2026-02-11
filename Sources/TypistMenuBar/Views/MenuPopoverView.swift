@@ -7,48 +7,63 @@ struct MenuPopoverView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.08, green: 0.09, blue: 0.11),
-                    Color(red: 0.12, green: 0.13, blue: 0.16)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
+                )
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     headerSection
+                    sectionDivider
                     timeframeSection
-                    metricsSection
+                    sectionDivider
                     chartSection
+
+                    if appModel.showHeatmapInPopover {
+                        sectionDivider
+                        heatmapSection
+                    }
+
+                    sectionDivider
                     topKeysSection
-                    diagnosticsSection
+
+                    sectionDivider
+                    metricsSection
+
+                    if appModel.showDiagnosticsInPopover {
+                        sectionDivider
+                        diagnosticsSection
+                    }
+
+                    sectionDivider
                     footerSection
                 }
-                .padding(14)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
+            .scrollIndicators(.hidden)
         }
-        .frame(width: 340)
+        .padding(8)
+        .frame(width: 344)
     }
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Keyboard")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-
-                Spacer()
-
-                Text(appModel.captureRunning ? "Live" : "Paused")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(appModel.captureRunning ? Color.cyan : Color.orange)
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 10) {
+                summaryMetric(title: "Keystrokes", value: formatCount(appModel.snapshot.totalKeystrokes))
+                summaryMetric(title: "Words", value: formatCount(appModel.snapshot.totalWords))
             }
 
+            Text("Timeframe: \(appModel.selectedTimeframe.title)")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.58))
+
             Text(appModel.statusMessage)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.62))
                 .lineLimit(2)
         }
     }
@@ -66,63 +81,102 @@ struct MenuPopoverView: View {
     }
 
     private var metricsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                statCard(title: "Keystrokes", value: formatCount(appModel.snapshot.totalKeystrokes))
-                statCard(title: "Words", value: formatCount(appModel.snapshot.totalWords))
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Keyboard mix")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.86))
 
             let breakdown = appModel.snapshot.deviceBreakdown
             let total = max(1, breakdown.builtIn + breakdown.external + breakdown.unknown)
 
-            HStack(spacing: 12) {
-                deviceTag(label: "Built-in", count: breakdown.builtIn, share: Double(breakdown.builtIn) / Double(total))
-                deviceTag(label: "External", count: breakdown.external, share: Double(breakdown.external) / Double(total))
-                deviceTag(label: "Unknown", count: breakdown.unknown, share: Double(breakdown.unknown) / Double(total))
-            }
+            infoRow(label: "Built-in", value: "\(formatCount(breakdown.builtIn)) • \(Int((Double(breakdown.builtIn) / Double(total) * 100).rounded()))%")
+            infoRow(label: "External", value: "\(formatCount(breakdown.external)) • \(Int((Double(breakdown.external) / Double(total) * 100).rounded()))%")
+            infoRow(label: "Unknown", value: "\(formatCount(breakdown.unknown)) • \(Int((Double(breakdown.unknown) / Double(total) * 100).rounded()))%")
         }
     }
 
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Trend")
+            Text("Last \(appModel.selectedTimeframe.title)")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(.white.opacity(0.86))
 
             TrendChartView(timeframe: appModel.snapshot.timeframe, points: appModel.snapshot.trendSeries)
         }
     }
 
+    private var heatmapSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Keyboard Heatmap")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+
+                Spacer()
+
+                Button("Open full view") {
+                    appModel.openSettings(tab: .keyboard)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+            }
+
+            KeyboardHeatmapView(
+                distribution: appModel.snapshot.keyDistribution,
+                totalKeystrokes: appModel.snapshot.totalKeystrokes,
+                selectedKeyCode: $appModel.selectedHeatmapKeyCode,
+                compact: true,
+                showLegend: false,
+                showSelectedDetails: true
+            )
+        }
+    }
+
     private var topKeysSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Top Keys")
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Most used keys")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(.white.opacity(0.86))
 
             if appModel.snapshot.topKeys.isEmpty {
-                Text("Start typing to see key distribution")
+                Text("Start typing to populate key rankings.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.56))
             } else {
                 ForEach(Array(appModel.snapshot.topKeys.prefix(5).enumerated()), id: \.element.id) { index, key in
-                    HStack {
-                        Text("\(index + 1). \(key.keyName)")
-                            .foregroundStyle(.white.opacity(0.9))
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                        Spacer()
-                        Text(formatCount(key.count))
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    }
+                    infoRow(label: "\(index + 1). \(key.keyName)", value: formatCount(key.count))
                 }
             }
         }
     }
 
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("Diagnostics")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+
+                Spacer()
+
+                Button("Copy") {
+                    appModel.copyDiagnosticsToClipboard()
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+            }
+
+            Text(appModel.debugSummary)
+                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.68))
+                .textSelection(.enabled)
+        }
+    }
+
     private var footerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Divider().overlay(Color.white.opacity(0.12))
-
             if !appModel.permissionGranted {
                 HStack(spacing: 8) {
                     Button("Enable Input Monitoring") {
@@ -133,7 +187,7 @@ struct MenuPopoverView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
 
-                    Button("Open Settings") {
+                    Button("Open System Settings") {
                         appModel.openInputMonitoringSettings()
                     }
                     .buttonStyle(.bordered)
@@ -151,112 +205,91 @@ struct MenuPopoverView: View {
             .toggleStyle(.checkbox)
             .font(.system(size: 11, weight: .medium, design: .rounded))
 
-            if let launchError = appModel.launchErrorMessage {
-                Text("Launch setting error: \(launchError)")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.orange)
-            }
-
-            HStack {
-                Button("Reset Stats") {
-                    Task {
-                        await appModel.resetStats()
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Button("Settings…") {
-                    appModel.openSettings()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Spacer()
-
-                Button("Quit") {
-                    NSApp.terminate(nil)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
+            menuActionRows
         }
     }
 
-    private var diagnosticsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Diagnostics")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.9))
-
-                Spacer()
-
-                Button("Copy Debug") {
-                    appModel.copyDiagnosticsToClipboard()
-                }
-                .buttonStyle(.borderless)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.cyan)
+    private var menuActionRows: some View {
+        VStack(spacing: 0) {
+            menuActionButton(title: "More") {
+                appModel.openSettings(tab: .statusIcon)
             }
 
-            Text(appModel.debugSummary)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(Color.white.opacity(0.85))
-                .textSelection(.enabled)
+            Divider().overlay(Color.white.opacity(0.08))
 
-            if appModel.debugLines.isEmpty {
-                Text("No diagnostic logs yet")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(appModel.debugLines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(.system(size: 9, weight: .regular, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
+            menuActionButton(title: "Settings…") {
+                appModel.openSettings()
+            }
+
+            Divider().overlay(Color.white.opacity(0.08))
+
+            menuActionButton(title: "Reset Stats") {
+                Task {
+                    await appModel.resetStats()
                 }
+            }
+
+            Divider().overlay(Color.white.opacity(0.08))
+
+            menuActionButton(title: "Quit Typist") {
+                NSApp.terminate(nil)
             }
         }
-        .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.04))
+                .fill(Color.white.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.6)
         )
     }
 
-    private func statCard(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
+    private func menuActionButton(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                Spacer()
+            }
+            .foregroundStyle(.white.opacity(0.86))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func infoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.66))
+
+            Spacer()
 
             Text(value)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.76))
+        }
+    }
+
+    private func summaryMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.6))
+
+            Text(value)
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.95))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(0.05))
-        )
     }
 
-    private func deviceTag(label: String, count: Int, share: Double) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-            Text("\(formatCount(count))  ·  \(Int((share * 100).rounded()))%")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
-        }
+    private var sectionDivider: some View {
+        Divider().overlay(Color.white.opacity(0.1))
     }
 
     private func formatCount(_ value: Int) -> String {

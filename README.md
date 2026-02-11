@@ -5,6 +5,7 @@ Typist is an ultra-light macOS menu bar app (macOS 14+) that tracks:
 - Word counts (privacy-safe boundary heuristic)
 - Per-key frequency
 - Built-in vs external keyboard usage (best-effort, with unknown fallback)
+- Interactive keyboard heatmap (Mac ANSI layout) with per-key drilldown
 
 It stores only local aggregate metrics and never stores typed text.
 
@@ -35,7 +36,7 @@ swift test
 - `HIDKeyboardCaptureService`: HID input capture.
 - `MenuBarController`: NSStatusItem + popover lifecycle.
 - `AppModel`: permission flow, refresh loops, and UI state.
-- `Views/*`: compact BatFi-inspired diagnostics UI.
+- `Views/*`: BatFi-inspired translucent popover, tabbed settings, and keyboard heatmap UI.
 
 ## Privacy defaults
 
@@ -48,7 +49,7 @@ swift test
 Use these checks before release:
 
 1. **Functional correctness**
-   - Verify key counts and words across timeframes (`12H`, `24H`, `7D`, `30D`, `All`).
+   - Verify key counts and words across timeframes (`1H`, `12H`, `24H`, `7D`, `30D`, `All`).
    - Verify built-in/external split using internal and USB/Bluetooth keyboards.
    - Verify permission denied/regranted behavior.
 

@@ -24,7 +24,7 @@ struct TrendChartView: View {
                 )
                 .foregroundStyle(
                     LinearGradient(
-                        colors: [Color.cyan.opacity(0.25), Color.cyan.opacity(0.03)],
+                        colors: [Color.white.opacity(0.14), Color.white.opacity(0.02)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -34,7 +34,7 @@ struct TrendChartView: View {
                     x: .value("Time", point.bucketStart),
                     y: .value("Keys", point.count)
                 )
-                .foregroundStyle(Color.cyan)
+                .foregroundStyle(Color.white.opacity(0.82))
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
                 .interpolationMethod(.catmullRom)
             }
@@ -45,6 +45,8 @@ struct TrendChartView: View {
             .chartYAxis {
                 AxisMarks(position: .trailing)
             }
+            .chartXAxisLabel(position: .bottom, alignment: .leading) {}
+            .chartYAxisLabel(position: .trailing, alignment: .top) {}
             .frame(height: 88)
         }
     }

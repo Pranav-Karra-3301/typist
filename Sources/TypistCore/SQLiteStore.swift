@@ -251,24 +251,25 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             }
         }
 
-        let topKeyRows = try queryRows(
+        let keyDistributionRows = try queryRows(
             """
             SELECT key_code, COALESCE(SUM(count), 0) AS c
             FROM \(keyTable)
             \(keyFilterClause)
             GROUP BY key_code
             ORDER BY c DESC
-            LIMIT 8;
             """,
             bindings: bindings
         )
 
-        let topKeys = topKeyRows.compactMap { row -> TopKeyStat? in
+        let keyDistribution = keyDistributionRows.compactMap { row -> TopKeyStat? in
             guard row.count >= 2 else { return nil }
             let keyCode = row[0].intValue
             let count = row[1].intValue
+            guard count > 0 else { return nil }
             return TopKeyStat(keyCode: keyCode, keyName: KeyboardKeyMapper.displayName(for: keyCode), count: count)
         }
+        let topKeys = Array(keyDistribution.prefix(8))
 
         let trendRows = try queryRows(
             """
@@ -300,6 +301,7 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             totalKeystrokes: totalKeys,
             totalWords: totalWords,
             deviceBreakdown: DeviceBreakdown(builtIn: builtIn, external: external, unknown: unknown),
+            keyDistribution: keyDistribution,
             topKeys: topKeys,
             trendSeries: trendSeries
         )

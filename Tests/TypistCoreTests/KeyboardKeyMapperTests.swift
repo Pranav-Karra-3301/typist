@@ -18,4 +18,8 @@ final class KeyboardKeyMapperTests: XCTestCase {
         XCTAssertEqual(KeyboardKeyMapper.displayName(for: 227), "Left Cmd")
         XCTAssertEqual(KeyboardKeyMapper.displayName(for: 231), "Right Cmd")
     }
+
+    func testSpaceIsSeparatorKey() {
+        XCTAssertTrue(KeyboardKeyMapper.isSeparator(44))
+    }
 }

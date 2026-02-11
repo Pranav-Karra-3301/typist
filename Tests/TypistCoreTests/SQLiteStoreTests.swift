@@ -22,6 +22,9 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(snapshot.totalKeystrokes, 2)
         XCTAssertEqual(snapshot.totalWords, 1)
         XCTAssertEqual(snapshot.deviceBreakdown.builtIn, 2)
+        XCTAssertEqual(snapshot.keyDistribution.count, 2)
+        XCTAssertEqual(snapshot.topKeys.count, 2)
+        XCTAssertEqual(Set(snapshot.topKeys.map(\.keyCode)), Set([4, 44]))
     }
 
     private func makeDatabaseURL(testName: String) -> URL {

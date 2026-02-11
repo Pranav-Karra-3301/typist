@@ -20,15 +20,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let model = AppModel(
                 metricsEngine: metricsEngine,
                 store: store,
-                queryService: store,
                 captureService: captureService,
                 launchAtLoginManager: launchManager
             )
 
             let controller = MenuBarController(appModel: model)
 
-            model.statusTitleHandler = { [weak controller] title in
-                controller?.updateStatusTitle(title)
+            model.statusItemStateHandler = { [weak controller] state in
+                controller?.applyStatusItemState(state)
             }
             model.openSettingsHandler = { [weak self] in
                 self?.showSettingsWindow()
@@ -75,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hostingController = NSHostingController(rootView: rootView)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 340),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
