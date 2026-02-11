@@ -85,9 +85,9 @@ cat > "$plist_path" <<EOF
     <key>CFBundleShortVersionString</key>
     <string>$version</string>
     <key>CFBundleIconFile</key>
-    <string>$icon_name</string>
-    <key>CFBundleIconName</key>
-    <string>$icon_name</string>
+    <string>${icon_name}.icns</string>
+    <key>NSApplicationIconFile</key>
+    <string>${icon_name}.icns</string>
     <key>LSMinimumSystemVersion</key>
     <string>$minimum_system_version</string>
     <key>LSUIElement</key>
