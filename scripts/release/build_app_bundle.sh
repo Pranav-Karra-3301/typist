@@ -13,6 +13,7 @@ icon_source="${APP_ICON_SOURCE:-scripts/release/assets/app-icon.png}"
 icon_name="AppIcon"
 round_icon="${APP_ICON_ROUND_CORNERS:-1}"
 icon_corner_radius="${APP_ICON_CORNER_RADIUS:-0.22}"
+adhoc_sign="${APP_ADHOC_SIGN:-1}"
 update_repo="${SOURCE_REPO:-pranavkarra/typist}"
 releases_url="${TYPIST_RELEASES_URL:-https://github.com/$update_repo/releases}"
 
@@ -101,5 +102,9 @@ cat > "$plist_path" <<EOF
 </dict>
 </plist>
 EOF
+
+if [[ "$adhoc_sign" == "1" ]]; then
+  codesign --force --deep --sign - "$app_bundle"
+fi
 
 echo "Built app bundle at $app_bundle"
