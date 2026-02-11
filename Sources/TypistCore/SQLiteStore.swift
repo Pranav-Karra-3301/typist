@@ -102,7 +102,8 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
     public func flush(
         events: [KeyEvent],
         wordIncrements: [WordIncrement],
-        activeTypingIncrements: [ActiveTypingIncrement]
+        activeTypingIncrements: [ActiveTypingIncrement],
+        sessionData: [SessionFlushData] = []
     ) async throws {
         try queue.sync {
             try flushSync(events: events, wordIncrements: wordIncrements, activeTypingIncrements: activeTypingIncrements)
@@ -250,25 +251,36 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 wordCountByHour[hourStart, default: 0] += 1
             }
 
-            // Aggregate active typing by hour and day buckets
+            // Aggregate active typing by hour and day buckets (including flow/skill)
             var activeSecondsByHour: [Int64: Double] = [:]
             var activeSecondsByDay: [Int64: Double] = [:]
+            var flowSecondsByHour: [Int64: Double] = [:]
+            var flowSecondsByDay: [Int64: Double] = [:]
+            var skillSecondsByHour: [Int64: Double] = [:]
+            var skillSecondsByDay: [Int64: Double] = [:]
             for increment in activeTypingIncrements {
                 let hourStart = Int64(increment.bucketStart.timeIntervalSince1970)
                 let dayStart = Int64(TimeBucket.startOfDay(for: increment.bucketStart, calendar: calendar).timeIntervalSince1970)
                 activeSecondsByHour[hourStart, default: 0] += increment.activeSeconds
                 activeSecondsByDay[dayStart, default: 0] += increment.activeSeconds
+                flowSecondsByHour[hourStart, default: 0] += increment.activeSecondsFlow
+                flowSecondsByDay[dayStart, default: 0] += increment.activeSecondsFlow
+                skillSecondsByHour[hourStart, default: 0] += increment.activeSecondsSkill
+                skillSecondsByDay[dayStart, default: 0] += increment.activeSecondsSkill
             }
 
             // Upsert hourly typing stats
             for (hourStart, seconds) in activeSecondsByHour {
                 let words = wordCountByHour[hourStart, default: 0]
+                let flow = flowSecondsByHour[hourStart, default: 0]
+                let skill = skillSecondsByHour[hourStart, default: 0]
                 try execute(
                     """
-                    INSERT INTO hourly_typing_stats(bucket_start, word_count, active_seconds)
-                    VALUES(\(hourStart), \(words), \(seconds))
+                    INSERT INTO hourly_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill)
+                    VALUES(\(hourStart), \(words), \(seconds), \(flow), \(skill))
                     ON CONFLICT(bucket_start)
-                    DO UPDATE SET word_count = word_count + \(words), active_seconds = active_seconds + \(seconds);
+                    DO UPDATE SET word_count = word_count + \(words), active_seconds = active_seconds + \(seconds),
+                    active_seconds_flow = active_seconds_flow + \(flow), active_seconds_skill = active_seconds_skill + \(skill);
                     """
                 )
             }
@@ -277,8 +289,8 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             for (hourStart, words) in wordCountByHour where activeSecondsByHour[hourStart] == nil {
                 try execute(
                     """
-                    INSERT INTO hourly_typing_stats(bucket_start, word_count, active_seconds)
-                    VALUES(\(hourStart), \(words), 0)
+                    INSERT INTO hourly_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill)
+                    VALUES(\(hourStart), \(words), 0, 0, 0)
                     ON CONFLICT(bucket_start)
                     DO UPDATE SET word_count = word_count + \(words);
                     """
@@ -295,12 +307,15 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             // Upsert daily typing stats
             for (dayStart, seconds) in activeSecondsByDay {
                 let words = wordCountByDay[dayStart, default: 0]
+                let flow = flowSecondsByDay[dayStart, default: 0]
+                let skill = skillSecondsByDay[dayStart, default: 0]
                 try execute(
                     """
-                    INSERT INTO daily_typing_stats(bucket_start, word_count, active_seconds)
-                    VALUES(\(dayStart), \(words), \(seconds))
+                    INSERT INTO daily_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill)
+                    VALUES(\(dayStart), \(words), \(seconds), \(flow), \(skill))
                     ON CONFLICT(bucket_start)
-                    DO UPDATE SET word_count = word_count + \(words), active_seconds = active_seconds + \(seconds);
+                    DO UPDATE SET word_count = word_count + \(words), active_seconds = active_seconds + \(seconds),
+                    active_seconds_flow = active_seconds_flow + \(flow), active_seconds_skill = active_seconds_skill + \(skill);
                     """
                 )
             }
@@ -309,8 +324,8 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             for (dayStart, words) in wordCountByDay where activeSecondsByDay[dayStart] == nil {
                 try execute(
                     """
-                    INSERT INTO daily_typing_stats(bucket_start, word_count, active_seconds)
-                    VALUES(\(dayStart), \(words), 0)
+                    INSERT INTO daily_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill)
+                    VALUES(\(dayStart), \(words), 0, 0, 0)
                     ON CONFLICT(bucket_start)
                     DO UPDATE SET word_count = word_count + \(words);
                     """
@@ -453,10 +468,23 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             now: now
         )
 
+        // Query aggregate session metrics
+        let sessionMetrics = try querySessionAggregates(
+            tableName: typingStatsTable,
+            filterClause: aggregateFilterClause,
+            bindings: aggregateBindings
+        )
+
         return StatsSnapshot(
             timeframe: timeframe,
             totalKeystrokes: totalKeys,
             totalWords: totalWords,
+            typedWords: sessionMetrics.typedWords,
+            pastedWordsEst: sessionMetrics.pastedWordsEst,
+            pasteEvents: sessionMetrics.pasteEvents,
+            editEvents: sessionMetrics.editEvents,
+            activeSecondsFlow: sessionMetrics.activeSecondsFlow,
+            activeSecondsSkill: sessionMetrics.activeSecondsSkill,
             deviceBreakdown: DeviceBreakdown(builtIn: builtIn, external: external, unknown: unknown),
             keyDistribution: keyDistribution,
             topKeys: topKeys,
@@ -464,6 +492,48 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             wpmTrendSeries: wpmTrendSeries,
             typingSpeedTrendSeries: typingSpeedTrendSeries,
             topAppsByWords: topAppsByWords
+        )
+    }
+
+    private struct SessionAggregates {
+        var typedWords: Int = 0
+        var pastedWordsEst: Int = 0
+        var pasteEvents: Int = 0
+        var editEvents: Int = 0
+        var activeSecondsFlow: Double = 0
+        var activeSecondsSkill: Double = 0
+    }
+
+    private func querySessionAggregates(
+        tableName: String,
+        filterClause: String,
+        bindings: [SQLiteBinding]
+    ) throws -> SessionAggregates {
+        let rows = try queryRows(
+            """
+            SELECT COALESCE(SUM(active_seconds_flow), 0),
+                   COALESCE(SUM(active_seconds_skill), 0),
+                   COALESCE(SUM(typed_words), 0),
+                   COALESCE(SUM(pasted_words_est), 0),
+                   COALESCE(SUM(paste_events), 0),
+                   COALESCE(SUM(edit_events), 0)
+            FROM \(tableName)
+            \(filterClause);
+            """,
+            bindings: bindings
+        )
+
+        guard let row = rows.first, row.count >= 6 else {
+            return SessionAggregates()
+        }
+
+        return SessionAggregates(
+            typedWords: row[2].intValue,
+            pastedWordsEst: row[3].intValue,
+            pasteEvents: row[4].intValue,
+            editEvents: row[5].intValue,
+            activeSecondsFlow: row[0].doubleValue,
+            activeSecondsSkill: row[1].doubleValue
         )
     }
 
@@ -554,10 +624,22 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             bindings: []
         )
 
+        let sessionMetrics = try querySessionAggregates(
+            tableName: "daily_typing_stats",
+            filterClause: "",
+            bindings: []
+        )
+
         return StatsSnapshot(
             timeframe: .all,
             totalKeystrokes: totalKeys,
             totalWords: totalWords,
+            typedWords: sessionMetrics.typedWords,
+            pastedWordsEst: sessionMetrics.pastedWordsEst,
+            pasteEvents: sessionMetrics.pasteEvents,
+            editEvents: sessionMetrics.editEvents,
+            activeSecondsFlow: sessionMetrics.activeSecondsFlow,
+            activeSecondsSkill: sessionMetrics.activeSecondsSkill,
             deviceBreakdown: DeviceBreakdown(builtIn: builtIn, external: external, unknown: unknown),
             keyDistribution: keyDistribution,
             topKeys: Array(keyDistribution.prefix(8)),
@@ -689,7 +771,7 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
     ) throws -> [TypingSpeedTrendPoint] {
         let rows = try queryRows(
             """
-            SELECT bucket_start, word_count, active_seconds
+            SELECT bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill
             FROM \(tableName)
             \(filterClause)
             ORDER BY bucket_start ASC;
@@ -702,10 +784,14 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             let bucketStart = Date(timeIntervalSince1970: TimeInterval(row[0].intValue))
             let words = row[1].intValue
             let activeSeconds = row[2].doubleValue
+            let flowSeconds = row.count >= 4 ? row[3].doubleValue : activeSeconds
+            let skillSeconds = row.count >= 5 ? row[4].doubleValue : activeSeconds
             return TypingSpeedTrendPoint(
                 bucketStart: bucketStart,
                 words: words,
-                activeSeconds: activeSeconds
+                activeSeconds: activeSeconds,
+                activeSecondsFlow: flowSeconds,
+                activeSecondsSkill: skillSeconds
             )
         }
     }
@@ -727,12 +813,15 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         let startBucket = TimeBucket.start(of: startDate, granularity: granularity, calendar: calendar)
         let endBucket = TimeBucket.start(of: now, granularity: granularity, calendar: calendar)
 
-        // Build maps for words and active seconds
         var wordsMap: [Date: Int] = [:]
         var secondsMap: [Date: Double] = [:]
+        var flowMap: [Date: Double] = [:]
+        var skillMap: [Date: Double] = [:]
         for point in points {
             wordsMap[point.bucketStart] = point.words
             secondsMap[point.bucketStart] = point.activeSeconds
+            flowMap[point.bucketStart] = point.activeSecondsFlow
+            skillMap[point.bucketStart] = point.activeSecondsSkill
         }
 
         var series: [TypingSpeedTrendPoint] = []
@@ -742,7 +831,9 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 TypingSpeedTrendPoint(
                     bucketStart: cursor,
                     words: wordsMap[cursor, default: 0],
-                    activeSeconds: secondsMap[cursor, default: 0]
+                    activeSeconds: secondsMap[cursor, default: 0],
+                    activeSecondsFlow: flowMap[cursor, default: 0],
+                    activeSecondsSkill: skillMap[cursor, default: 0]
                 )
             )
             cursor = TimeBucket.advance(cursor, by: granularity, calendar: calendar)
@@ -828,7 +919,13 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS hourly_typing_stats (
                 bucket_start INTEGER NOT NULL PRIMARY KEY,
                 word_count INTEGER NOT NULL DEFAULT 0,
-                active_seconds REAL NOT NULL DEFAULT 0
+                active_seconds REAL NOT NULL DEFAULT 0,
+                active_seconds_flow REAL NOT NULL DEFAULT 0,
+                active_seconds_skill REAL NOT NULL DEFAULT 0,
+                typed_words INTEGER NOT NULL DEFAULT 0,
+                pasted_words_est INTEGER NOT NULL DEFAULT 0,
+                paste_events INTEGER NOT NULL DEFAULT 0,
+                edit_events INTEGER NOT NULL DEFAULT 0
             );
             """
         )
@@ -838,7 +935,13 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS daily_typing_stats (
                 bucket_start INTEGER NOT NULL PRIMARY KEY,
                 word_count INTEGER NOT NULL DEFAULT 0,
-                active_seconds REAL NOT NULL DEFAULT 0
+                active_seconds REAL NOT NULL DEFAULT 0,
+                active_seconds_flow REAL NOT NULL DEFAULT 0,
+                active_seconds_skill REAL NOT NULL DEFAULT 0,
+                typed_words INTEGER NOT NULL DEFAULT 0,
+                pasted_words_est INTEGER NOT NULL DEFAULT 0,
+                paste_events INTEGER NOT NULL DEFAULT 0,
+                edit_events INTEGER NOT NULL DEFAULT 0
             );
             """
         )
@@ -854,6 +957,27 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         )
 
         try execute("CREATE INDEX IF NOT EXISTS idx_event_ring_buffer_ts ON event_ring_buffer(ts);")
+
+        // Migrate existing databases: add new columns if missing
+        try migrateTypingStatsColumns()
+    }
+
+    private func migrateTypingStatsColumns() throws {
+        let newColumns = [
+            "active_seconds_flow REAL NOT NULL DEFAULT 0",
+            "active_seconds_skill REAL NOT NULL DEFAULT 0",
+            "typed_words INTEGER NOT NULL DEFAULT 0",
+            "pasted_words_est INTEGER NOT NULL DEFAULT 0",
+            "paste_events INTEGER NOT NULL DEFAULT 0",
+            "edit_events INTEGER NOT NULL DEFAULT 0"
+        ]
+
+        for table in ["hourly_typing_stats", "daily_typing_stats"] {
+            for columnDef in newColumns {
+                // ALTER TABLE ADD COLUMN is a no-op if column exists (SQLite returns error we ignore)
+                try? execute("ALTER TABLE \(table) ADD COLUMN \(columnDef);")
+            }
+        }
     }
 
     private func sanitizeInvalidKeyCodes() throws {

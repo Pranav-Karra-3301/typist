@@ -120,11 +120,16 @@ public enum TimeBucket {
 
 public struct KeyEvent: Sendable, Hashable {
     public let timestamp: Date
+    /// Monotonic uptime (ProcessInfo.systemUptime) for accurate delta computation across sleep/wake.
+    public let monotonicTime: TimeInterval
     public let keyCode: Int
     public let isSeparator: Bool
+    public let isTextProducing: Bool
     public let deviceClass: DeviceClass
     public let appBundleID: String?
     public let appName: String?
+    /// True if this keystroke is part of a paste chord (Cmd+V detected).
+    public let isPasteChord: Bool
 
     public init(
         timestamp: Date,
@@ -132,14 +137,83 @@ public struct KeyEvent: Sendable, Hashable {
         isSeparator: Bool,
         deviceClass: DeviceClass,
         appBundleID: String? = nil,
-        appName: String? = nil
+        appName: String? = nil,
+        monotonicTime: TimeInterval = ProcessInfo.processInfo.systemUptime,
+        isTextProducing: Bool? = nil,
+        isPasteChord: Bool = false
     ) {
         self.timestamp = timestamp
+        self.monotonicTime = monotonicTime
         self.keyCode = keyCode
         self.isSeparator = isSeparator
+        self.isTextProducing = isTextProducing ?? KeyboardKeyMapper.isTextProducingKey(keyCode)
         self.deviceClass = deviceClass
         self.appBundleID = appBundleID
         self.appName = appName
+        self.isPasteChord = isPasteChord
+    }
+}
+
+// MARK: - Session Configuration
+
+public struct SessionConfig: Sendable {
+    /// Max idle gap before starting a new session (seconds).
+    public let sessionTimeout: TimeInterval
+    /// Max gap counted as "active flow typing" (includes short thinking pauses).
+    public let idleCapFlow: TimeInterval
+    /// Max gap counted as "active skill typing" (mostly finger speed).
+    public let idleCapSkill: TimeInterval
+
+    public static let `default` = SessionConfig(
+        sessionTimeout: 60,
+        idleCapFlow: 12,
+        idleCapSkill: 2
+    )
+
+    public init(sessionTimeout: TimeInterval, idleCapFlow: TimeInterval, idleCapSkill: TimeInterval) {
+        self.sessionTimeout = sessionTimeout
+        self.idleCapFlow = idleCapFlow
+        self.idleCapSkill = idleCapSkill
+    }
+}
+
+// MARK: - Session State
+
+/// Represents a per-app typing session.
+public struct TypingSession: Sendable {
+    public let appBundleID: String
+    public let appName: String
+    public var sessionStart: Date
+    public var lastTextEventTime: Date
+    public var lastMonotonicTime: TimeInterval
+    public var typedWords: Int
+    public var pastedWordsEst: Int
+    public var pasteEvents: Int
+    public var editEvents: Int
+    public var activeSecondsFlow: Double
+    public var activeSecondsSkill: Double
+    public var inWord: Bool
+    public var wordHasChars: Bool
+
+    public init(
+        appBundleID: String,
+        appName: String,
+        startTime: Date,
+        monotonicTime: TimeInterval
+    ) {
+        self.appBundleID = appBundleID
+        self.appName = appName
+        self.sessionStart = startTime
+        self.lastTextEventTime = startTime
+        self.lastMonotonicTime = monotonicTime
+        self.typedWords = 0
+        self.pastedWordsEst = 0
+        self.pasteEvents = 0
+        self.editEvents = 0
+        self.activeSecondsFlow = 0
+        self.activeSecondsSkill = 0
+        self.inWord = false
+        self.wordHasChars = false
     }
 }
 
@@ -192,27 +266,43 @@ public struct TypingSpeedTrendPoint: Sendable, Hashable, Identifiable {
     public let bucketStart: Date
     public let words: Int
     public let activeSeconds: Double
+    public let activeSecondsFlow: Double
+    public let activeSecondsSkill: Double
     public let wpm: Double
+    public let flowWPM: Double
+    public let skillWPM: Double
 
     public var id: TimeInterval { bucketStart.timeIntervalSince1970 }
 
-    public init(bucketStart: Date, words: Int, activeSeconds: Double) {
+    public init(
+        bucketStart: Date,
+        words: Int,
+        activeSeconds: Double,
+        activeSecondsFlow: Double = 0,
+        activeSecondsSkill: Double = 0
+    ) {
         self.bucketStart = bucketStart
         self.words = words
         self.activeSeconds = activeSeconds
-        // Calculate actual WPM: words / (active minutes)
-        // If no active time, WPM is 0
+        self.activeSecondsFlow = activeSecondsFlow > 0 ? activeSecondsFlow : activeSeconds
+        self.activeSecondsSkill = activeSecondsSkill > 0 ? activeSecondsSkill : activeSeconds
         self.wpm = activeSeconds > 0 ? Double(words) / (activeSeconds / 60.0) : 0
+        self.flowWPM = self.activeSecondsFlow > 0 ? Double(words) / (self.activeSecondsFlow / 60.0) : 0
+        self.skillWPM = self.activeSecondsSkill > 0 ? Double(words) / (self.activeSecondsSkill / 60.0) : 0
     }
 }
 
 public struct ActiveTypingIncrement: Sendable, Hashable {
     public let bucketStart: Date
     public let activeSeconds: Double
+    public let activeSecondsFlow: Double
+    public let activeSecondsSkill: Double
 
-    public init(bucketStart: Date, activeSeconds: Double) {
+    public init(bucketStart: Date, activeSeconds: Double, activeSecondsFlow: Double = 0, activeSecondsSkill: Double = 0) {
         self.bucketStart = bucketStart
         self.activeSeconds = activeSeconds
+        self.activeSecondsFlow = activeSecondsFlow > 0 ? activeSecondsFlow : activeSeconds
+        self.activeSecondsSkill = activeSecondsSkill > 0 ? activeSecondsSkill : activeSeconds
     }
 }
 
@@ -260,6 +350,12 @@ public struct StatsSnapshot: Sendable, Hashable {
     public let timeframe: Timeframe
     public var totalKeystrokes: Int
     public var totalWords: Int
+    public var typedWords: Int
+    public var pastedWordsEst: Int
+    public var pasteEvents: Int
+    public var editEvents: Int
+    public var activeSecondsFlow: Double
+    public var activeSecondsSkill: Double
     public var deviceBreakdown: DeviceBreakdown
     public var keyDistribution: [TopKeyStat]
     public var topKeys: [TopKeyStat]
@@ -268,10 +364,38 @@ public struct StatsSnapshot: Sendable, Hashable {
     public var typingSpeedTrendSeries: [TypingSpeedTrendPoint]
     public var topAppsByWords: [AppWordStat]
 
+    /// Flow WPM: typed_words / (active_seconds_flow / 60). Includes short think pauses.
+    public var flowWPM: Double {
+        activeSecondsFlow > 0 ? Double(typedWords) / (activeSecondsFlow / 60.0) : 0
+    }
+
+    /// Skill WPM: typed_words / (active_seconds_skill / 60). Finger speed only.
+    public var skillWPM: Double {
+        activeSecondsSkill > 0 ? Double(typedWords) / (activeSecondsSkill / 60.0) : 0
+    }
+
+    /// Assisted WPM: includes paste-estimated words in flow time.
+    public var assistedWPM: Double {
+        activeSecondsFlow > 0 ? Double(typedWords + pastedWordsEst) / (activeSecondsFlow / 60.0) : 0
+    }
+
+    /// Edit ratio: deleted_events / total_events (approximate).
+    public var editRatio: Double {
+        let total = totalKeystrokes
+        guard total > 0 else { return 0 }
+        return Double(editEvents) / Double(total)
+    }
+
     public init(
         timeframe: Timeframe,
         totalKeystrokes: Int,
         totalWords: Int,
+        typedWords: Int = 0,
+        pastedWordsEst: Int = 0,
+        pasteEvents: Int = 0,
+        editEvents: Int = 0,
+        activeSecondsFlow: Double = 0,
+        activeSecondsSkill: Double = 0,
         deviceBreakdown: DeviceBreakdown,
         keyDistribution: [TopKeyStat],
         topKeys: [TopKeyStat],
@@ -283,6 +407,12 @@ public struct StatsSnapshot: Sendable, Hashable {
         self.timeframe = timeframe
         self.totalKeystrokes = totalKeystrokes
         self.totalWords = totalWords
+        self.typedWords = typedWords
+        self.pastedWordsEst = pastedWordsEst
+        self.pasteEvents = pasteEvents
+        self.editEvents = editEvents
+        self.activeSecondsFlow = activeSecondsFlow
+        self.activeSecondsSkill = activeSecondsSkill
         self.deviceBreakdown = deviceBreakdown
         self.keyDistribution = keyDistribution
         self.topKeys = topKeys
@@ -297,6 +427,12 @@ public struct StatsSnapshot: Sendable, Hashable {
             timeframe: timeframe,
             totalKeystrokes: 0,
             totalWords: 0,
+            typedWords: 0,
+            pastedWordsEst: 0,
+            pasteEvents: 0,
+            editEvents: 0,
+            activeSecondsFlow: 0,
+            activeSecondsSkill: 0,
             deviceBreakdown: DeviceBreakdown(builtIn: 0, external: 0, unknown: 0),
             keyDistribution: [],
             topKeys: [],
@@ -314,11 +450,47 @@ public protocol KeyboardCaptureProviding {
     func stop()
 }
 
+/// Aggregated session metrics for flushing to persistence.
+public struct SessionFlushData: Sendable {
+    public let bucketStart: Date
+    public let typedWords: Int
+    public let pastedWordsEst: Int
+    public let pasteEvents: Int
+    public let editEvents: Int
+    public let activeSecondsFlow: Double
+    public let activeSecondsSkill: Double
+    public let appBundleID: String
+    public let appName: String
+
+    public init(
+        bucketStart: Date,
+        typedWords: Int,
+        pastedWordsEst: Int,
+        pasteEvents: Int,
+        editEvents: Int,
+        activeSecondsFlow: Double,
+        activeSecondsSkill: Double,
+        appBundleID: String,
+        appName: String
+    ) {
+        self.bucketStart = bucketStart
+        self.typedWords = typedWords
+        self.pastedWordsEst = pastedWordsEst
+        self.pasteEvents = pasteEvents
+        self.editEvents = editEvents
+        self.activeSecondsFlow = activeSecondsFlow
+        self.activeSecondsSkill = activeSecondsSkill
+        self.appBundleID = appBundleID
+        self.appName = appName
+    }
+}
+
 public protocol PersistenceWriting: Sendable {
     func flush(
         events: [KeyEvent],
         wordIncrements: [WordIncrement],
-        activeTypingIncrements: [ActiveTypingIncrement]
+        activeTypingIncrements: [ActiveTypingIncrement],
+        sessionData: [SessionFlushData]
     ) async throws
 }
 

@@ -7,14 +7,14 @@ struct TypingSpeedChartView: View {
     let points: [TypingSpeedTrendPoint]
 
     private var hasData: Bool {
-        points.contains { $0.wpm > 0 }
+        points.contains { $0.flowWPM > 0 }
     }
 
-    private var averageWPM: Double {
-        let validPoints = points.filter { $0.activeSeconds > 0 }
+    private var averageFlowWPM: Double {
+        let validPoints = points.filter { $0.activeSecondsFlow > 0 }
         guard !validPoints.isEmpty else { return 0 }
         let totalWords = validPoints.reduce(0) { $0 + $1.words }
-        let totalSeconds = validPoints.reduce(0.0) { $0 + $1.activeSeconds }
+        let totalSeconds = validPoints.reduce(0.0) { $0 + $1.activeSecondsFlow }
         return totalSeconds > 0 ? Double(totalWords) / (totalSeconds / 60.0) : 0
     }
 
@@ -31,7 +31,7 @@ struct TypingSpeedChartView: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("Avg: \(Int(averageWPM.rounded())) WPM")
+                    Text("Avg Flow: \(Int(averageFlowWPM.rounded())) WPM")
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.6))
                     Spacer()
@@ -40,7 +40,7 @@ struct TypingSpeedChartView: View {
                 Chart(points) { point in
                     AreaMark(
                         x: .value("Time", point.bucketStart),
-                        y: .value("WPM", point.wpm)
+                        y: .value("Flow WPM", point.flowWPM)
                     )
                     .foregroundStyle(
                         LinearGradient(
@@ -52,7 +52,7 @@ struct TypingSpeedChartView: View {
 
                     LineMark(
                         x: .value("Time", point.bucketStart),
-                        y: .value("WPM", point.wpm)
+                        y: .value("Flow WPM", point.flowWPM)
                     )
                     .foregroundStyle(Color.green.opacity(0.82))
                     .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))

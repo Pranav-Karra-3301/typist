@@ -135,7 +135,8 @@ private actor MockStore: TypistStore {
     func flush(
         events: [KeyEvent],
         wordIncrements: [WordIncrement],
-        activeTypingIncrements: [ActiveTypingIncrement]
+        activeTypingIncrements: [ActiveTypingIncrement],
+        sessionData: [SessionFlushData]
     ) async throws {
         flushedEventCount += events.count
     }
