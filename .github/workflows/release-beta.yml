@@ -1,0 +1,95 @@
+name: release-beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: Run swift tests before release
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-14
+    env:
+      APP_BUNDLE_ID: ${{ vars.APP_BUNDLE_ID }}
+      APP_NAME: Typist
+      APP_EXECUTABLE: TypistMenuBar
+      TAP_REPO: ${{ vars.TAP_REPO }}
+      TAP_DEFAULT_BRANCH: ${{ vars.TAP_DEFAULT_BRANCH }}
+      SOURCE_REPO: ${{ github.repository }}
+      APPLE_DEVELOPER_ID_CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12_BASE64 }}
+      APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+      DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+      APPLE_API_PRIVATE_KEY_P8: ${{ secrets.APPLE_API_PRIVATE_KEY_P8 }}
+      TAP_REPO_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tag history is present
+        run: git fetch --tags --force
+
+      - name: Run tests
+        if: inputs.run_tests
+        run: swift test
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Bootstrap prerelease baseline tag
+        run: |
+          if git tag --list 'v0.1.0-beta.*' | grep -q .; then
+            exit 0
+          fi
+
+          first_commit="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+          git tag "v0.1.0-beta.0" "$first_commit"
+          git push origin "v0.1.0-beta.0"
+
+      - name: Resolve next release version
+        id: version
+        run: |
+          scripts/release/semantic_release.sh --dry-run --no-ci | tee /tmp/semantic-release.log
+          next_version="$(sed -nE 's/.*next release version is ([0-9A-Za-z.-]+).*/\1/p' /tmp/semantic-release.log | tail -n 1)"
+
+          if [[ -z "$next_version" ]]; then
+            echo "::error::semantic-release did not produce a next version."
+            exit 1
+          fi
+
+          echo "version=$next_version" >> "$GITHUB_OUTPUT"
+
+      - name: Build app bundle
+        run: scripts/release/build_app_bundle.sh "${{ steps.version.outputs.version }}" "${{ github.run_number }}" dist
+
+      - name: Build DMG
+        run: scripts/release/create_dmg.sh "${{ steps.version.outputs.version }}" dist
+
+      - name: Sign and notarize DMG
+        run: scripts/release/sign_and_notarize.sh "dist/Typist.app" "dist/Typist-${{ steps.version.outputs.version }}.dmg"
+
+      - name: Publish prerelease
+        run: scripts/release/semantic_release.sh
+
+      - name: Compute DMG SHA256
+        id: checksum
+        run: |
+          sha="$(scripts/release/compute_sha256.sh "dist/Typist-${{ steps.version.outputs.version }}.dmg")"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew tap
+        if: env.TAP_REPO != '' && env.TAP_REPO_TOKEN != ''
+        run: scripts/release/update_tap_repo.sh "${{ steps.version.outputs.version }}" "${{ steps.checksum.outputs.sha }}"

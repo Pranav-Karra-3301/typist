@@ -105,9 +105,17 @@ struct MenuPopoverView: View {
 
     private var typingSpeedSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Typing speed")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.86))
+            HStack(spacing: 6) {
+                Text("Typing speed")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+                Text("BETA")
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 3))
+            }
 
             TypingSpeedChartView(
                 timeframe: appModel.snapshot.timeframe,
