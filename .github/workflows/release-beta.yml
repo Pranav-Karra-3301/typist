@@ -20,6 +20,7 @@ jobs:
       APP_BUNDLE_ID: ${{ vars.APP_BUNDLE_ID }}
       APP_NAME: Typist
       APP_EXECUTABLE: TypistMenuBar
+      BASE_BETA_VERSION: 0.1.0
       TAP_REPO: ${{ vars.TAP_REPO }}
       TAP_DEFAULT_BRANCH: ${{ vars.TAP_DEFAULT_BRANCH }}
       SOURCE_REPO: ${{ github.repository }}
@@ -44,32 +45,16 @@ jobs:
         if: inputs.run_tests
         run: swift test
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Bootstrap prerelease baseline tag
-        run: |
-          if git tag --list 'v0.1.0-beta.*' | grep -q .; then
-            exit 0
-          fi
-
-          first_commit="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
-          git tag "v0.1.0-beta.0" "$first_commit"
-          git push origin "v0.1.0-beta.0"
-
       - name: Resolve next release version
         id: version
         run: |
-          scripts/release/semantic_release.sh --dry-run --no-ci | tee /tmp/semantic-release.log
-          next_version="$(sed -nE 's/.*next release version is ([0-9A-Za-z.-]+).*/\1/p' /tmp/semantic-release.log | tail -n 1)"
-
-          if [[ -z "$next_version" ]]; then
-            echo "::error::semantic-release did not produce a next version."
-            exit 1
+          current_max="$(git tag --list "v${BASE_BETA_VERSION}-beta.*" | awk -F'.beta.' '/^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$/ {print $2}' | sort -n | tail -n 1)"
+          if [[ -z "$current_max" ]]; then
+            next_number=1
+          else
+            next_number=$((current_max + 1))
           fi
-
+          next_version="${BASE_BETA_VERSION}-beta.${next_number}"
           echo "version=$next_version" >> "$GITHUB_OUTPUT"
 
       - name: Build app bundle
@@ -79,10 +64,32 @@ jobs:
         run: scripts/release/create_dmg.sh "${{ steps.version.outputs.version }}" dist
 
       - name: Sign and notarize DMG
+        if: env.APPLE_DEVELOPER_ID_CERT_P12_BASE64 != '' && env.APPLE_DEVELOPER_ID_CERT_PASSWORD != '' && env.APPLE_API_KEY_ID != '' && env.APPLE_API_ISSUER_ID != '' && env.APPLE_API_PRIVATE_KEY_P8 != ''
         run: scripts/release/sign_and_notarize.sh "dist/Typist.app" "dist/Typist-${{ steps.version.outputs.version }}.dmg"
 
+      - name: Skip notarization (credentials missing)
+        if: env.APPLE_DEVELOPER_ID_CERT_P12_BASE64 == '' || env.APPLE_DEVELOPER_ID_CERT_PASSWORD == '' || env.APPLE_API_KEY_ID == '' || env.APPLE_API_ISSUER_ID == '' || env.APPLE_API_PRIVATE_KEY_P8 == ''
+        run: echo "Apple signing/notarization secrets are missing; publishing unsigned DMG."
+
       - name: Publish prerelease
-        run: scripts/release/semantic_release.sh
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          release_args=(
+            "v${version}"
+            "dist/Typist-${version}.dmg"
+            --repo "${{ github.repository }}"
+            --target "${{ github.sha }}"
+            --title "Typist v${version}"
+            --generate-notes
+            --prerelease
+          )
+
+          if [[ -n "$latest_tag" ]]; then
+            release_args+=(--notes-start-tag "$latest_tag")
+          fi
+
+          gh release create "${release_args[@]}"
 
       - name: Compute DMG SHA256
         id: checksum
