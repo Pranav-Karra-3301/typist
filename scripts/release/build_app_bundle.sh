@@ -10,7 +10,8 @@ binary_name="${APP_EXECUTABLE:-TypistMenuBar}"
 bundle_id="${APP_BUNDLE_ID:-com.pranavkarra.typist}"
 minimum_system_version="${MINIMUM_SYSTEM_VERSION:-14.0}"
 
-bin_path="$(swift build -c release --product "$binary_name" --show-bin-path | tail -n 1)"
+swift build -c release --product "$binary_name"
+bin_path="$(swift build -c release --show-bin-path | tail -n 1)"
 binary_path="$bin_path/$binary_name"
 
 if [[ ! -x "$binary_path" ]]; then
