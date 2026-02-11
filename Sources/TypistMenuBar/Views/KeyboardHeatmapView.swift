@@ -13,6 +13,7 @@ private struct KeyboardKeySpec: Identifiable {
     let keyCode: Int?
     let visual: KeyCapVisual
     let widthUnits: CGFloat
+    let heightUnits: CGFloat
     let isSpacer: Bool
 }
 
@@ -96,16 +97,16 @@ private enum KeyboardLayoutANSI {
             keyText("rightShift", 229, "⇧", width: 2.4)
         ],
         [
-            spacer("arrowTopSpacerFn", width: 1.2),
-            spacer("arrowTopSpacerCtrl", width: 1.35),
-            spacer("arrowTopSpacerOpt", width: 1.35),
-            spacer("arrowTopSpacerCmd", width: 1.5),
-            spacer("arrowTopSpacerSpace", width: 5.55),
-            spacer("arrowTopSpacerCmd2", width: 1.5),
-            spacer("arrowTopSpacerOpt2", width: 1.35),
-            spacer("arrowTopSpacerLeft", width: 1),
-            keySymbol("upArrow", 82, "arrow.up", width: 1),
-            spacer("arrowTopSpacerRight", width: 1)
+            spacer("arrowTopSpacerFn", width: 1.2, height: 0.5),
+            spacer("arrowTopSpacerCtrl", width: 1.35, height: 0.5),
+            spacer("arrowTopSpacerOpt", width: 1.35, height: 0.5),
+            spacer("arrowTopSpacerCmd", width: 1.5, height: 0.5),
+            spacer("arrowTopSpacerSpace", width: 5.55, height: 0.5),
+            spacer("arrowTopSpacerCmd2", width: 1.5, height: 0.5),
+            spacer("arrowTopSpacerOpt2", width: 1.35, height: 0.5),
+            spacer("arrowTopSpacerLeft", width: 1, height: 0.5),
+            keySymbol("upArrow", 82, "arrow.up", width: 1, height: 0.5),
+            spacer("arrowTopSpacerRight", width: 1, height: 0.5)
         ],
         [
             keyText("fn", nil, "fn", width: 1.2),
@@ -116,7 +117,7 @@ private enum KeyboardLayoutANSI {
             keyText("rightCommand", 231, "⌘", width: 1.5),
             keyText("rightOption", 230, "⌥", width: 1.35),
             keySymbol("leftArrow", 80, "arrow.left", width: 1),
-            keySymbol("downArrow", 81, "arrow.down", width: 1),
+            keySymbol("downArrow", 81, "arrow.down", width: 1, height: 0.5),
             keySymbol("rightArrow", 79, "arrow.right", width: 1)
         ]
     ]
@@ -184,15 +185,15 @@ private enum KeyboardLayoutANSI {
             keyText("rightShift", 229, "⇧", width: 2.1)
         ],
         [
-            spacer("compactArrowTopCtrl", width: 1.2),
-            spacer("compactArrowTopOpt", width: 1.2),
-            spacer("compactArrowTopCmd", width: 1.3),
-            spacer("compactArrowTopSpace", width: 5.1),
-            spacer("compactArrowTopCmd2", width: 1.3),
-            spacer("compactArrowTopOpt2", width: 1.2),
-            spacer("compactArrowTopLeft", width: 1),
-            keySymbol("upArrow", 82, "arrow.up", width: 1),
-            spacer("compactArrowTopRight", width: 1)
+            spacer("compactArrowTopCtrl", width: 1.2, height: 0.5),
+            spacer("compactArrowTopOpt", width: 1.2, height: 0.5),
+            spacer("compactArrowTopCmd", width: 1.3, height: 0.5),
+            spacer("compactArrowTopSpace", width: 5.1, height: 0.5),
+            spacer("compactArrowTopCmd2", width: 1.3, height: 0.5),
+            spacer("compactArrowTopOpt2", width: 1.2, height: 0.5),
+            spacer("compactArrowTopLeft", width: 1, height: 0.5),
+            keySymbol("upArrow", 82, "arrow.up", width: 1, height: 0.5),
+            spacer("compactArrowTopRight", width: 1, height: 0.5)
         ],
         [
             keyText("leftControl", 224, "⌃", width: 1.2),
@@ -202,7 +203,7 @@ private enum KeyboardLayoutANSI {
             keyText("rightCommand", 231, "⌘", width: 1.3),
             keyText("rightOption", 230, "⌥", width: 1.2),
             keySymbol("leftArrow", 80, "arrow.left", width: 1),
-            keySymbol("downArrow", 81, "arrow.down", width: 1),
+            keySymbol("downArrow", 81, "arrow.down", width: 1, height: 0.5),
             keySymbol("rightArrow", 79, "arrow.right", width: 1)
         ]
     ]
@@ -212,29 +213,63 @@ private enum KeyboardLayoutANSI {
         _ keyCode: Int?,
         _ visual: KeyCapVisual,
         width: CGFloat = 1,
+        height: CGFloat = 1,
         isSpacer: Bool = false
     ) -> KeyboardKeySpec {
-        KeyboardKeySpec(id: id, keyCode: keyCode, visual: visual, widthUnits: width, isSpacer: isSpacer)
+        KeyboardKeySpec(
+            id: id,
+            keyCode: keyCode,
+            visual: visual,
+            widthUnits: width,
+            heightUnits: height,
+            isSpacer: isSpacer
+        )
     }
 
-    private static func spacer(_ id: String, width: CGFloat) -> KeyboardKeySpec {
-        key(id, nil, .text(""), width: width, isSpacer: true)
+    private static func spacer(_ id: String, width: CGFloat, height: CGFloat = 1) -> KeyboardKeySpec {
+        key(id, nil, .text(""), width: width, height: height, isSpacer: true)
     }
 
-    private static func keyText(_ id: String, _ keyCode: Int?, _ text: String, width: CGFloat = 1) -> KeyboardKeySpec {
-        key(id, keyCode, .text(text), width: width)
+    private static func keyText(
+        _ id: String,
+        _ keyCode: Int?,
+        _ text: String,
+        width: CGFloat = 1,
+        height: CGFloat = 1
+    ) -> KeyboardKeySpec {
+        key(id, keyCode, .text(text), width: width, height: height)
     }
 
-    private static func keySymbol(_ id: String, _ keyCode: Int?, _ symbol: String, width: CGFloat = 1) -> KeyboardKeySpec {
-        key(id, keyCode, .symbol(symbol), width: width)
+    private static func keySymbol(
+        _ id: String,
+        _ keyCode: Int?,
+        _ symbol: String,
+        width: CGFloat = 1,
+        height: CGFloat = 1
+    ) -> KeyboardKeySpec {
+        key(id, keyCode, .symbol(symbol), width: width, height: height)
     }
 
-    private static func keyStacked(_ id: String, _ keyCode: Int?, top: String, bottom: String, width: CGFloat = 1) -> KeyboardKeySpec {
-        key(id, keyCode, .stacked(top: top, bottom: bottom), width: width)
+    private static func keyStacked(
+        _ id: String,
+        _ keyCode: Int?,
+        top: String,
+        bottom: String,
+        width: CGFloat = 1,
+        height: CGFloat = 1
+    ) -> KeyboardKeySpec {
+        key(id, keyCode, .stacked(top: top, bottom: bottom), width: width, height: height)
     }
 
-    private static func keySymbolLabel(_ id: String, _ keyCode: Int?, symbol: String, label: String, width: CGFloat = 1) -> KeyboardKeySpec {
-        key(id, keyCode, .symbolWithLabel(symbol: symbol, label: label), width: width)
+    private static func keySymbolLabel(
+        _ id: String,
+        _ keyCode: Int?,
+        symbol: String,
+        label: String,
+        width: CGFloat = 1,
+        height: CGFloat = 1
+    ) -> KeyboardKeySpec {
+        key(id, keyCode, .symbolWithLabel(symbol: symbol, label: label), width: width, height: height)
     }
 }
 
@@ -278,7 +313,10 @@ struct KeyboardHeatmapView: View {
     private var maxUnitWidth: CGFloat { compact ? 14.5 : 30 }
 
     private var gridHeight: CGFloat {
-        keyHeight * CGFloat(rows.count) + rowSpacing * CGFloat(max(0, rows.count - 1))
+        let totalRowHeights = rows.reduce(CGFloat.zero) { partial, row in
+            partial + rowHeight(for: row)
+        }
+        return totalRowHeights + rowSpacing * CGFloat(max(0, rows.count - 1))
     }
 
     var body: some View {
@@ -303,20 +341,24 @@ struct KeyboardHeatmapView: View {
     private func keyGrid(unitWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: rowSpacing) {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                let rowHeight = rowHeight(for: row)
                 HStack(spacing: keySpacing) {
                     ForEach(row) { key in
-                        keyCap(for: key, unitWidth: unitWidth)
+                        keyCap(for: key, unitWidth: unitWidth, rowHeight: rowHeight)
                     }
                 }
+                .frame(height: rowHeight, alignment: .leading)
             }
         }
     }
 
     @ViewBuilder
-    private func keyCap(for key: KeyboardKeySpec, unitWidth: CGFloat) -> some View {
+    private func keyCap(for key: KeyboardKeySpec, unitWidth: CGFloat, rowHeight: CGFloat) -> some View {
+        let capHeight = keyHeight * key.heightUnits
         if key.isSpacer {
             Color.clear
-                .frame(width: key.widthUnits * unitWidth, height: keyHeight)
+                .frame(width: key.widthUnits * unitWidth, height: capHeight)
+                .frame(height: rowHeight)
         } else {
             let count = key.keyCode.flatMap { countByKeyCode[$0] } ?? 0
             let intensity = key.keyCode.map(heatIntensity(for:)) ?? 0
@@ -347,10 +389,11 @@ struct KeyboardHeatmapView: View {
                     }
                     .padding(.horizontal, compact ? 2 : 4)
                 }
-                .frame(width: key.widthUnits * unitWidth, height: keyHeight)
+                .frame(width: key.widthUnits * unitWidth, height: capHeight)
             }
             .buttonStyle(.plain)
             .help(keyHelpText(for: key, count: count))
+            .frame(height: rowHeight)
         }
     }
 
@@ -362,6 +405,7 @@ struct KeyboardHeatmapView: View {
                 .font(.system(size: compact ? 8 : 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)
+                .minimumScaleFactor(0.65)
 
         case let .symbol(systemName):
             Image(systemName: systemName)
@@ -380,6 +424,7 @@ struct KeyboardHeatmapView: View {
                     .font(.system(size: compact ? 8 : 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.65)
             }
 
         case let .symbolWithLabel(symbol, label):
@@ -459,7 +504,7 @@ struct KeyboardHeatmapView: View {
     }
 
     private func resolvedUnitWidth(for availableWidth: CGFloat) -> CGFloat {
-        let width = max(availableWidth, 120)
+        let width = max(availableWidth - 1, 120)
         let candidates = rows.map { row -> CGFloat in
             let units = row.reduce(CGFloat.zero) { $0 + $1.widthUnits }
             let gaps = CGFloat(max(0, row.count - 1)) * keySpacing
@@ -468,6 +513,11 @@ struct KeyboardHeatmapView: View {
 
         let proposed = floor((candidates.min() ?? minUnitWidth) * 100) / 100
         return max(minUnitWidth, min(maxUnitWidth, proposed))
+    }
+
+    private func rowHeight(for row: [KeyboardKeySpec]) -> CGFloat {
+        let maxUnits = row.map(\.heightUnits).max() ?? 1
+        return maxUnits * keyHeight
     }
 
     private func keyHelpText(for key: KeyboardKeySpec, count: Int) -> String {

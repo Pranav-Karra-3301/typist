@@ -69,7 +69,9 @@ final class AppModel: ObservableObject {
 
     @Published var selectedTimeframe: Timeframe = .h12 {
         didSet {
-            Task { await refreshSelectedTimeframe() }
+            selectedHeatmapKeyCode = nil
+            let timeframe = selectedTimeframe
+            Task { await refreshSelectedTimeframe(for: timeframe) }
         }
     }
 
@@ -319,14 +321,20 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshSelectedTimeframe() async {
+        await refreshSelectedTimeframe(for: selectedTimeframe)
+    }
+
+    private func refreshSelectedTimeframe(for timeframe: Timeframe) async {
         do {
-            let latest = try await metricsEngine.snapshot(for: selectedTimeframe, now: Date())
+            let latest = try await metricsEngine.snapshot(for: timeframe, now: Date())
+            guard timeframe == selectedTimeframe else { return }
             snapshot = latest
             snapshotRefreshCount += 1
             if snapshotRefreshCount <= 3 || snapshotRefreshCount % 20 == 0 {
-                diagnostics.mark("Snapshot refresh: timeframe=\(selectedTimeframe.rawValue) keys=\(latest.totalKeystrokes) words=\(latest.totalWords)")
+                diagnostics.mark("Snapshot refresh: timeframe=\(timeframe.rawValue) keys=\(latest.totalKeystrokes) words=\(latest.totalWords)")
             }
         } catch {
+            guard timeframe == selectedTimeframe else { return }
             statusMessage = "Failed to load stats: \(error.localizedDescription)"
             diagnostics.mark("Snapshot refresh failed: \(error.localizedDescription)")
         }

@@ -43,6 +43,36 @@ final class MetricsEngineTests: XCTestCase {
         let flushedEvents = await store.flushedEventCount
         XCTAssertEqual(flushedEvents, 2)
     }
+
+    func testSnapshotChangesCountsAndTopKeysByTimeframe() async throws {
+        let store = MockStore()
+        let engine = MetricsEngine(store: store, queryService: store, flushInterval: .seconds(60), flushThreshold: 200)
+
+        await engine.start()
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let events = [
+            KeyEvent(timestamp: now.addingTimeInterval(-26 * 3600), keyCode: 4, isSeparator: false, deviceClass: .builtIn),
+            KeyEvent(timestamp: now.addingTimeInterval(-26 * 3600 + 1), keyCode: 4, isSeparator: false, deviceClass: .builtIn),
+            KeyEvent(timestamp: now.addingTimeInterval(-40 * 60), keyCode: 5, isSeparator: false, deviceClass: .builtIn),
+            KeyEvent(timestamp: now.addingTimeInterval(-30 * 60), keyCode: 5, isSeparator: false, deviceClass: .builtIn),
+            KeyEvent(timestamp: now.addingTimeInterval(-20 * 60), keyCode: 6, isSeparator: false, deviceClass: .builtIn)
+        ]
+
+        for event in events {
+            await engine.ingest(event)
+        }
+
+        let oneHour = try await engine.snapshot(for: .h1, now: now)
+        XCTAssertEqual(oneHour.totalKeystrokes, 3)
+        XCTAssertEqual(oneHour.topKeys.first?.keyCode, 5)
+        XCTAssertEqual(oneHour.topKeys.first?.count, 2)
+
+        let sevenDays = try await engine.snapshot(for: .d7, now: now)
+        XCTAssertEqual(sevenDays.totalKeystrokes, 5)
+        XCTAssertEqual(sevenDays.topKeys.first?.keyCode, 4)
+        XCTAssertEqual(sevenDays.topKeys.first?.count, 2)
+    }
 }
 
 private actor MockStore: TypistStore {

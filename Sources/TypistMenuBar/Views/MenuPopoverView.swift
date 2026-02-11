@@ -30,13 +30,13 @@ struct MenuPopoverView: View {
                     sectionDivider
                     topKeysSection
 
-                    sectionDivider
-                    metricsSection
-
                     if appModel.showDiagnosticsInPopover {
                         sectionDivider
                         diagnosticsSection
                     }
+
+                    sectionDivider
+                    metricsSection
 
                     sectionDivider
                     footerSection
@@ -51,20 +51,11 @@ struct MenuPopoverView: View {
     }
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
                 summaryMetric(title: "Keystrokes", value: formatCount(appModel.snapshot.totalKeystrokes))
                 summaryMetric(title: "Words", value: formatCount(appModel.snapshot.totalWords))
             }
-
-            Text("Timeframe: \(appModel.selectedTimeframe.title)")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.58))
-
-            Text(appModel.statusMessage)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.62))
-                .lineLimit(2)
         }
     }
 
@@ -97,7 +88,7 @@ struct MenuPopoverView: View {
 
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Last \(appModel.selectedTimeframe.title)")
+            Text("Activity")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.86))
 
