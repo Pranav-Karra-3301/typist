@@ -274,6 +274,12 @@ public struct TypingSpeedTrendPoint: Sendable, Hashable, Identifiable {
 
     public var id: TimeInterval { bucketStart.timeIntervalSince1970 }
 
+    /// Minimum active seconds in a bucket before WPM is meaningful.
+    private static let minActiveSecondsForWPM: Double = 5.0
+    /// Hard caps to prevent absurd spikes from noisy buckets.
+    private static let maxFlowWPM: Double = 200.0
+    private static let maxSkillWPM: Double = 300.0
+
     public init(
         bucketStart: Date,
         words: Int,
@@ -286,9 +292,21 @@ public struct TypingSpeedTrendPoint: Sendable, Hashable, Identifiable {
         self.activeSeconds = activeSeconds
         self.activeSecondsFlow = activeSecondsFlow > 0 ? activeSecondsFlow : activeSeconds
         self.activeSecondsSkill = activeSecondsSkill > 0 ? activeSecondsSkill : activeSeconds
-        self.wpm = activeSeconds > 0 ? Double(words) / (activeSeconds / 60.0) : 0
-        self.flowWPM = self.activeSecondsFlow > 0 ? Double(words) / (self.activeSecondsFlow / 60.0) : 0
-        self.skillWPM = self.activeSecondsSkill > 0 ? Double(words) / (self.activeSecondsSkill / 60.0) : 0
+
+        let rawWPM = activeSeconds > 0 ? Double(words) / (activeSeconds / 60.0) : 0
+        self.wpm = min(rawWPM, Self.maxFlowWPM)
+
+        if self.activeSecondsFlow >= Self.minActiveSecondsForWPM {
+            self.flowWPM = min(Double(words) / (self.activeSecondsFlow / 60.0), Self.maxFlowWPM)
+        } else {
+            self.flowWPM = 0
+        }
+
+        if self.activeSecondsSkill >= Self.minActiveSecondsForWPM {
+            self.skillWPM = min(Double(words) / (self.activeSecondsSkill / 60.0), Self.maxSkillWPM)
+        } else {
+            self.skillWPM = 0
+        }
     }
 }
 
@@ -366,17 +384,20 @@ public struct StatsSnapshot: Sendable, Hashable {
 
     /// Flow WPM: typed_words / (active_seconds_flow / 60). Includes short think pauses.
     public var flowWPM: Double {
-        activeSecondsFlow > 0 ? Double(typedWords) / (activeSecondsFlow / 60.0) : 0
+        guard activeSecondsFlow >= 5 else { return 0 }
+        return min(Double(typedWords) / (activeSecondsFlow / 60.0), 200)
     }
 
     /// Skill WPM: typed_words / (active_seconds_skill / 60). Finger speed only.
     public var skillWPM: Double {
-        activeSecondsSkill > 0 ? Double(typedWords) / (activeSecondsSkill / 60.0) : 0
+        guard activeSecondsSkill >= 5 else { return 0 }
+        return min(Double(typedWords) / (activeSecondsSkill / 60.0), 300)
     }
 
     /// Assisted WPM: includes paste-estimated words in flow time.
     public var assistedWPM: Double {
-        activeSecondsFlow > 0 ? Double(typedWords + pastedWordsEst) / (activeSecondsFlow / 60.0) : 0
+        guard activeSecondsFlow >= 5 else { return 0 }
+        return min(Double(typedWords + pastedWordsEst) / (activeSecondsFlow / 60.0), 200)
     }
 
     /// Edit ratio: deleted_events / total_events (approximate).

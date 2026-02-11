@@ -15,7 +15,8 @@ struct TypingSpeedChartView: View {
         guard !validPoints.isEmpty else { return 0 }
         let totalWords = validPoints.reduce(0) { $0 + $1.words }
         let totalSeconds = validPoints.reduce(0.0) { $0 + $1.activeSecondsFlow }
-        return totalSeconds > 0 ? Double(totalWords) / (totalSeconds / 60.0) : 0
+        guard totalSeconds >= 5 else { return 0 }
+        return min(Double(totalWords) / (totalSeconds / 60.0), 200)
     }
 
     var body: some View {
@@ -60,12 +61,20 @@ struct TypingSpeedChartView: View {
                 }
                 .chartLegend(.hidden)
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 4))
+                    AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel {
+                            if let date = value.as(Date.self) {
+                                Text(date, format: Self.axisDateFormat(for: timeframe))
+                                    .font(.system(size: 9, design: .rounded))
+                            }
+                        }
+                    }
                 }
                 .chartYAxis {
                     AxisMarks(position: .trailing)
                 }
-                .chartXAxisLabel(position: .bottom, alignment: .leading) {}
                 .chartYAxisLabel(position: .trailing, alignment: .top) {
                     Text("WPM")
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -73,6 +82,21 @@ struct TypingSpeedChartView: View {
                 }
                 .frame(height: 76)
             }
+        }
+    }
+
+    static func axisDateFormat(for timeframe: Timeframe) -> Date.FormatStyle {
+        switch timeframe {
+        case .h1:
+            return .dateTime.hour().minute()
+        case .h12, .h24:
+            return .dateTime.hour()
+        case .d7:
+            return .dateTime.weekday(.abbreviated)
+        case .d30:
+            return .dateTime.month(.abbreviated).day()
+        case .all:
+            return .dateTime.month(.abbreviated).year(.twoDigits)
         }
     }
 }
