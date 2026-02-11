@@ -35,12 +35,22 @@ private enum SQLiteBinding {
 
 private enum SQLiteValue {
     case int(Int)
+    case double(Double)
     case text(String)
     case null
 
     var intValue: Int {
         switch self {
         case let .int(value): return value
+        case let .double(value): return Int(value)
+        case .text, .null: return 0
+        }
+    }
+
+    var doubleValue: Double {
+        switch self {
+        case let .double(value): return value
+        case let .int(value): return Double(value)
         case .text, .null: return 0
         }
     }
@@ -48,7 +58,7 @@ private enum SQLiteValue {
     var textValue: String {
         switch self {
         case let .text(value): return value
-        case .int, .null: return ""
+        case .int, .double, .null: return ""
         }
     }
 }
@@ -89,9 +99,13 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         }
     }
 
-    public func flush(events: [KeyEvent], wordIncrements: [WordIncrement]) async throws {
+    public func flush(
+        events: [KeyEvent],
+        wordIncrements: [WordIncrement],
+        activeTypingIncrements: [ActiveTypingIncrement]
+    ) async throws {
         try queue.sync {
-            try flushSync(events: events, wordIncrements: wordIncrements)
+            try flushSync(events: events, wordIncrements: wordIncrements, activeTypingIncrements: activeTypingIncrements)
         }
     }
 
@@ -108,11 +122,19 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             try execute("DELETE FROM daily_key_counts;")
             try execute("DELETE FROM hourly_word_counts;")
             try execute("DELETE FROM daily_word_counts;")
+            try execute("DELETE FROM hourly_app_word_counts;")
+            try execute("DELETE FROM daily_app_word_counts;")
+            try execute("DELETE FROM hourly_typing_stats;")
+            try execute("DELETE FROM daily_typing_stats;")
         }
     }
 
-    private func flushSync(events: [KeyEvent], wordIncrements: [WordIncrement]) throws {
-        guard !events.isEmpty || !wordIncrements.isEmpty else { return }
+    private func flushSync(
+        events: [KeyEvent],
+        wordIncrements: [WordIncrement],
+        activeTypingIncrements: [ActiveTypingIncrement]
+    ) throws {
+        guard !events.isEmpty || !wordIncrements.isEmpty || !activeTypingIncrements.isEmpty else { return }
 
         try execute("BEGIN IMMEDIATE TRANSACTION;")
 
@@ -162,6 +184,26 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             )
             defer { sqlite3_finalize(upsertDailyWord) }
 
+            let upsertHourlyAppWord = try prepare(
+                """
+                INSERT INTO hourly_app_word_counts(bucket_start, app_bundle_id, app_name, count)
+                VALUES(?, ?, ?, 1)
+                ON CONFLICT(bucket_start, app_bundle_id)
+                DO UPDATE SET count = count + 1, app_name = excluded.app_name;
+                """
+            )
+            defer { sqlite3_finalize(upsertHourlyAppWord) }
+
+            let upsertDailyAppWord = try prepare(
+                """
+                INSERT INTO daily_app_word_counts(bucket_start, app_bundle_id, app_name, count)
+                VALUES(?, ?, ?, 1)
+                ON CONFLICT(bucket_start, app_bundle_id)
+                DO UPDATE SET count = count + 1, app_name = excluded.app_name;
+                """
+            )
+            defer { sqlite3_finalize(upsertDailyAppWord) }
+
             for event in events where KeyboardKeyMapper.isTrackableKeyCode(event.keyCode) {
                 let ts = Int64(event.timestamp.timeIntervalSince1970)
                 let hourStart = Int64(TimeBucket.startOfHour(for: event.timestamp, calendar: calendar).timeIntervalSince1970)
@@ -186,9 +228,93 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             for increment in wordIncrements {
                 let hourStart = Int64(TimeBucket.startOfHour(for: increment.timestamp, calendar: calendar).timeIntervalSince1970)
                 let dayStart = Int64(TimeBucket.startOfDay(for: increment.timestamp, calendar: calendar).timeIntervalSince1970)
+                let appIdentity = AppIdentity.normalize(bundleID: increment.appBundleID, appName: increment.appName)
 
                 try run(upsertHourlyWord, bindings: [.int64(hourStart), .text(increment.deviceClass.rawValue)])
                 try run(upsertDailyWord, bindings: [.int64(dayStart), .text(increment.deviceClass.rawValue)])
+                try run(
+                    upsertHourlyAppWord,
+                    bindings: [.int64(hourStart), .text(appIdentity.bundleID), .text(appIdentity.appName)]
+                )
+                try run(
+                    upsertDailyAppWord,
+                    bindings: [.int64(dayStart), .text(appIdentity.bundleID), .text(appIdentity.appName)]
+                )
+            }
+
+            // Store typing stats (active seconds and word counts for typing speed calculation)
+            // First, aggregate word increments by hour bucket
+            var wordCountByHour: [Int64: Int] = [:]
+            for increment in wordIncrements {
+                let hourStart = Int64(TimeBucket.startOfHour(for: increment.timestamp, calendar: calendar).timeIntervalSince1970)
+                wordCountByHour[hourStart, default: 0] += 1
+            }
+
+            // Aggregate active typing by hour and day buckets
+            var activeSecondsByHour: [Int64: Double] = [:]
+            var activeSecondsByDay: [Int64: Double] = [:]
+            for increment in activeTypingIncrements {
+                let hourStart = Int64(increment.bucketStart.timeIntervalSince1970)
+                let dayStart = Int64(TimeBucket.startOfDay(for: increment.bucketStart, calendar: calendar).timeIntervalSince1970)
+                activeSecondsByHour[hourStart, default: 0] += increment.activeSeconds
+                activeSecondsByDay[dayStart, default: 0] += increment.activeSeconds
+            }
+
+            // Upsert hourly typing stats
+            for (hourStart, seconds) in activeSecondsByHour {
+                let words = wordCountByHour[hourStart, default: 0]
+                try execute(
+                    """
+                    INSERT INTO hourly_typing_stats(bucket_start, word_count, active_seconds)
+                    VALUES(\(hourStart), \(words), \(seconds))
+                    ON CONFLICT(bucket_start)
+                    DO UPDATE SET word_count = word_count + \(words), active_seconds = active_seconds + \(seconds);
+                    """
+                )
+            }
+
+            // Also update hourly stats for word counts without active seconds
+            for (hourStart, words) in wordCountByHour where activeSecondsByHour[hourStart] == nil {
+                try execute(
+                    """
+                    INSERT INTO hourly_typing_stats(bucket_start, word_count, active_seconds)
+                    VALUES(\(hourStart), \(words), 0)
+                    ON CONFLICT(bucket_start)
+                    DO UPDATE SET word_count = word_count + \(words);
+                    """
+                )
+            }
+
+            // Aggregate word counts by day for daily stats
+            var wordCountByDay: [Int64: Int] = [:]
+            for increment in wordIncrements {
+                let dayStart = Int64(TimeBucket.startOfDay(for: increment.timestamp, calendar: calendar).timeIntervalSince1970)
+                wordCountByDay[dayStart, default: 0] += 1
+            }
+
+            // Upsert daily typing stats
+            for (dayStart, seconds) in activeSecondsByDay {
+                let words = wordCountByDay[dayStart, default: 0]
+                try execute(
+                    """
+                    INSERT INTO daily_typing_stats(bucket_start, word_count, active_seconds)
+                    VALUES(\(dayStart), \(words), \(seconds))
+                    ON CONFLICT(bucket_start)
+                    DO UPDATE SET word_count = word_count + \(words), active_seconds = active_seconds + \(seconds);
+                    """
+                )
+            }
+
+            // Also update daily stats for word counts without active seconds
+            for (dayStart, words) in wordCountByDay where activeSecondsByDay[dayStart] == nil {
+                try execute(
+                    """
+                    INSERT INTO daily_typing_stats(bucket_start, word_count, active_seconds)
+                    VALUES(\(dayStart), \(words), 0)
+                    ON CONFLICT(bucket_start)
+                    DO UPDATE SET word_count = word_count + \(words);
+                    """
+                )
             }
 
             try execute("COMMIT;")
@@ -205,26 +331,35 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             return try snapshotFromAggregateTablesForAll()
         }
 
-        let granularity = timeframe == .all ? TimeBucketGranularity.day : timeframe.trendGranularity
+        let granularity = timeframe.trendGranularity
         let keyRange = KeyboardKeyMapper.validKeyCodeRange
+        let wordTable = granularity == .hour ? "hourly_word_counts" : "daily_word_counts"
+        let appWordTable = granularity == .hour ? "hourly_app_word_counts" : "daily_app_word_counts"
 
         let startDate = timeframe.startDate(now: now, calendar: calendar)
         let startTimestamp = startDate.map { Int64($0.timeIntervalSince1970) }
+        let startBucketTimestamp = startDate.map {
+            Int64(TimeBucket.start(of: $0, granularity: granularity, calendar: calendar).timeIntervalSince1970)
+        }
+
         let keyCodePredicate = "key_code >= \(keyRange.lowerBound) AND key_code <= \(keyRange.upperBound)"
         let eventFilterClause = startTimestamp == nil
             ? " WHERE \(keyCodePredicate)"
             : " WHERE ts >= ? AND \(keyCodePredicate)"
-        let bindings = startTimestamp.map { [SQLiteBinding.int64($0)] } ?? []
+        let eventBindings = startTimestamp.map { [SQLiteBinding.int64($0)] } ?? []
+
+        let aggregateFilterClause = startBucketTimestamp == nil ? "" : " WHERE bucket_start >= ?"
+        let aggregateBindings = startBucketTimestamp.map { [SQLiteBinding.int64($0)] } ?? []
 
         let totalKeys = try querySingleInt(
             "SELECT COUNT(*) FROM event_ring_buffer\(eventFilterClause);",
-            bindings: bindings
+            bindings: eventBindings
         )
         let totalWords = try wordCountFromEventRing(startTimestamp: startTimestamp, keyCodeRange: keyRange)
 
         let breakdownRows = try queryRows(
             "SELECT device_class, COUNT(*) FROM event_ring_buffer\(eventFilterClause) GROUP BY device_class;",
-            bindings: bindings
+            bindings: eventBindings
         )
 
         var builtIn = 0
@@ -250,7 +385,7 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             GROUP BY key_code
             ORDER BY c DESC, key_code ASC
             """,
-            bindings: bindings
+            bindings: eventBindings
         )
 
         let keyDistribution = keyDistributionRows.compactMap { row -> TopKeyStat? in
@@ -271,7 +406,7 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             GROUP BY bucket_start
             ORDER BY bucket_start ASC;
             """,
-            bindings: bindings
+            bindings: eventBindings
         )
 
         let rawTrend = trendRows.compactMap { row -> TrendPoint? in
@@ -288,6 +423,36 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             now: now
         )
 
+        let wpmTrendSeries = fillWPMTrendIfNeeded(
+            points: try queryWPMTrend(
+                tableName: wordTable,
+                filterClause: aggregateFilterClause,
+                bindings: aggregateBindings,
+                granularity: granularity
+            ),
+            timeframe: timeframe,
+            granularity: granularity,
+            now: now
+        )
+
+        let topAppsByWords = try queryTopAppsByWords(
+            tableName: appWordTable,
+            filterClause: aggregateFilterClause,
+            bindings: aggregateBindings
+        )
+
+        let typingStatsTable = granularity == .hour ? "hourly_typing_stats" : "daily_typing_stats"
+        let typingSpeedTrendSeries = fillTypingSpeedTrendIfNeeded(
+            points: try queryTypingSpeedTrend(
+                tableName: typingStatsTable,
+                filterClause: aggregateFilterClause,
+                bindings: aggregateBindings
+            ),
+            timeframe: timeframe,
+            granularity: granularity,
+            now: now
+        )
+
         return StatsSnapshot(
             timeframe: timeframe,
             totalKeystrokes: totalKeys,
@@ -295,7 +460,10 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             deviceBreakdown: DeviceBreakdown(builtIn: builtIn, external: external, unknown: unknown),
             keyDistribution: keyDistribution,
             topKeys: topKeys,
-            trendSeries: trendSeries
+            trendSeries: trendSeries,
+            wpmTrendSeries: wpmTrendSeries,
+            typingSpeedTrendSeries: typingSpeedTrendSeries,
+            topAppsByWords: topAppsByWords
         )
     }
 
@@ -367,6 +535,25 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             return TrendPoint(bucketStart: Date(timeIntervalSince1970: TimeInterval(ts)), count: count)
         }
 
+        let wpmTrendSeries = try queryWPMTrend(
+            tableName: "daily_word_counts",
+            filterClause: "",
+            bindings: [],
+            granularity: .day
+        )
+
+        let topAppsByWords = try queryTopAppsByWords(
+            tableName: "daily_app_word_counts",
+            filterClause: "",
+            bindings: []
+        )
+
+        let typingSpeedTrendSeries = try queryTypingSpeedTrend(
+            tableName: "daily_typing_stats",
+            filterClause: "",
+            bindings: []
+        )
+
         return StatsSnapshot(
             timeframe: .all,
             totalKeystrokes: totalKeys,
@@ -374,7 +561,10 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             deviceBreakdown: DeviceBreakdown(builtIn: builtIn, external: external, unknown: unknown),
             keyDistribution: keyDistribution,
             topKeys: Array(keyDistribution.prefix(8)),
-            trendSeries: trendSeries
+            trendSeries: trendSeries,
+            wpmTrendSeries: wpmTrendSeries,
+            typingSpeedTrendSeries: typingSpeedTrendSeries,
+            topAppsByWords: topAppsByWords
         )
     }
 
@@ -436,6 +626,131 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         return words
     }
 
+    private func queryWPMTrend(
+        tableName: String,
+        filterClause: String,
+        bindings: [SQLiteBinding],
+        granularity: TimeBucketGranularity
+    ) throws -> [WPMTrendPoint] {
+        let rows = try queryRows(
+            """
+            SELECT bucket_start, COALESCE(SUM(count), 0) AS c
+            FROM \(tableName)
+            \(filterClause)
+            GROUP BY bucket_start
+            ORDER BY bucket_start ASC;
+            """,
+            bindings: bindings
+        )
+
+        return rows.compactMap { row -> WPMTrendPoint? in
+            guard row.count >= 2 else { return nil }
+            let bucketStart = Date(timeIntervalSince1970: TimeInterval(row[0].intValue))
+            let words = row[1].intValue
+            return WPMTrendPoint(
+                bucketStart: bucketStart,
+                words: words,
+                rate: Double(words) / granularity.bucketMinutes
+            )
+        }
+    }
+
+    private func queryTopAppsByWords(
+        tableName: String,
+        filterClause: String,
+        bindings: [SQLiteBinding]
+    ) throws -> [AppWordStat] {
+        let rows = try queryRows(
+            """
+            SELECT app_bundle_id, COALESCE(MAX(app_name), app_bundle_id), COALESCE(SUM(count), 0) AS c
+            FROM \(tableName)
+            \(filterClause)
+            GROUP BY app_bundle_id
+            ORDER BY c DESC, app_bundle_id ASC
+            LIMIT 20;
+            """,
+            bindings: bindings
+        )
+
+        return rows.compactMap { row -> AppWordStat? in
+            guard row.count >= 3 else { return nil }
+            let bundleID = row[0].textValue
+            let appName = row[1].textValue
+            let wordCount = row[2].intValue
+            guard wordCount > 0 else { return nil }
+            return AppWordStat(bundleID: bundleID, appName: appName, wordCount: wordCount)
+        }
+    }
+
+    private func queryTypingSpeedTrend(
+        tableName: String,
+        filterClause: String,
+        bindings: [SQLiteBinding]
+    ) throws -> [TypingSpeedTrendPoint] {
+        let rows = try queryRows(
+            """
+            SELECT bucket_start, word_count, active_seconds
+            FROM \(tableName)
+            \(filterClause)
+            ORDER BY bucket_start ASC;
+            """,
+            bindings: bindings
+        )
+
+        return rows.compactMap { row -> TypingSpeedTrendPoint? in
+            guard row.count >= 3 else { return nil }
+            let bucketStart = Date(timeIntervalSince1970: TimeInterval(row[0].intValue))
+            let words = row[1].intValue
+            let activeSeconds = row[2].doubleValue
+            return TypingSpeedTrendPoint(
+                bucketStart: bucketStart,
+                words: words,
+                activeSeconds: activeSeconds
+            )
+        }
+    }
+
+    private func fillTypingSpeedTrendIfNeeded(
+        points: [TypingSpeedTrendPoint],
+        timeframe: Timeframe,
+        granularity: TimeBucketGranularity,
+        now: Date
+    ) -> [TypingSpeedTrendPoint] {
+        guard timeframe != .all else {
+            return points
+        }
+
+        guard let startDate = timeframe.startDate(now: now, calendar: calendar) else {
+            return points
+        }
+
+        let startBucket = TimeBucket.start(of: startDate, granularity: granularity, calendar: calendar)
+        let endBucket = TimeBucket.start(of: now, granularity: granularity, calendar: calendar)
+
+        // Build maps for words and active seconds
+        var wordsMap: [Date: Int] = [:]
+        var secondsMap: [Date: Double] = [:]
+        for point in points {
+            wordsMap[point.bucketStart] = point.words
+            secondsMap[point.bucketStart] = point.activeSeconds
+        }
+
+        var series: [TypingSpeedTrendPoint] = []
+        var cursor = startBucket
+        while cursor <= endBucket {
+            series.append(
+                TypingSpeedTrendPoint(
+                    bucketStart: cursor,
+                    words: wordsMap[cursor, default: 0],
+                    activeSeconds: secondsMap[cursor, default: 0]
+                )
+            )
+            cursor = TimeBucket.advance(cursor, by: granularity, calendar: calendar)
+        }
+
+        return series
+    }
+
     private func createSchema() throws {
         try execute(
             """
@@ -485,6 +800,51 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
 
         try execute(
             """
+            CREATE TABLE IF NOT EXISTS hourly_app_word_counts (
+                bucket_start INTEGER NOT NULL,
+                app_bundle_id TEXT NOT NULL,
+                app_name TEXT NOT NULL,
+                count INTEGER NOT NULL,
+                PRIMARY KEY(bucket_start, app_bundle_id)
+            );
+            """
+        )
+
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_app_word_counts (
+                bucket_start INTEGER NOT NULL,
+                app_bundle_id TEXT NOT NULL,
+                app_name TEXT NOT NULL,
+                count INTEGER NOT NULL,
+                PRIMARY KEY(bucket_start, app_bundle_id)
+            );
+            """
+        )
+
+        // Typing speed tracking: stores active typing seconds and word count per bucket
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS hourly_typing_stats (
+                bucket_start INTEGER NOT NULL PRIMARY KEY,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                active_seconds REAL NOT NULL DEFAULT 0
+            );
+            """
+        )
+
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS daily_typing_stats (
+                bucket_start INTEGER NOT NULL PRIMARY KEY,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                active_seconds REAL NOT NULL DEFAULT 0
+            );
+            """
+        )
+
+        try execute(
+            """
             CREATE TABLE IF NOT EXISTS event_ring_buffer (
                 ts INTEGER NOT NULL,
                 key_code INTEGER NOT NULL,
@@ -511,10 +871,17 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         let cutoff = now.addingTimeInterval(TimeInterval(-retentionDays * 86_400))
         let cutoffTs = Int64(cutoff.timeIntervalSince1970)
 
+        // Prune raw events
         let statement = try prepare("DELETE FROM event_ring_buffer WHERE ts < ?;")
         defer { sqlite3_finalize(statement) }
-
         try run(statement, bindings: [.int64(cutoffTs)])
+
+        // Prune hourly aggregate tables (keep daily tables for long-term history)
+        try execute("DELETE FROM hourly_key_counts WHERE bucket_start < \(cutoffTs);")
+        try execute("DELETE FROM hourly_word_counts WHERE bucket_start < \(cutoffTs);")
+        try execute("DELETE FROM hourly_app_word_counts WHERE bucket_start < \(cutoffTs);")
+        try execute("DELETE FROM hourly_typing_stats WHERE bucket_start < \(cutoffTs);")
+
         lastPruneDate = now
     }
 
@@ -541,6 +908,42 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         var cursor = startBucket
         while cursor <= endBucket {
             series.append(TrendPoint(bucketStart: cursor, count: pointMap[cursor, default: 0]))
+            cursor = TimeBucket.advance(cursor, by: granularity, calendar: calendar)
+        }
+
+        return series
+    }
+
+    private func fillWPMTrendIfNeeded(
+        points: [WPMTrendPoint],
+        timeframe: Timeframe,
+        granularity: TimeBucketGranularity,
+        now: Date
+    ) -> [WPMTrendPoint] {
+        guard timeframe != .all else {
+            return points
+        }
+
+        guard let startDate = timeframe.startDate(now: now, calendar: calendar) else {
+            return points
+        }
+
+        let startBucket = TimeBucket.start(of: startDate, granularity: granularity, calendar: calendar)
+        let endBucket = TimeBucket.start(of: now, granularity: granularity, calendar: calendar)
+
+        let pointMap = Dictionary(uniqueKeysWithValues: points.map { ($0.bucketStart, $0.words) })
+        var series: [WPMTrendPoint] = []
+
+        var cursor = startBucket
+        while cursor <= endBucket {
+            let words = pointMap[cursor, default: 0]
+            series.append(
+                WPMTrendPoint(
+                    bucketStart: cursor,
+                    words: words,
+                    rate: Double(words) / granularity.bucketMinutes
+                )
+            )
             cursor = TimeBucket.advance(cursor, by: granularity, calendar: calendar)
         }
 
@@ -609,6 +1012,8 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 switch type {
                 case SQLITE_INTEGER:
                     row.append(.int(Int(sqlite3_column_int64(statement, Int32(column)))))
+                case SQLITE_FLOAT:
+                    row.append(.double(sqlite3_column_double(statement, Int32(column))))
                 case SQLITE_TEXT:
                     if let cString = sqlite3_column_text(statement, Int32(column)) {
                         row.append(.text(String(cString: cString)))

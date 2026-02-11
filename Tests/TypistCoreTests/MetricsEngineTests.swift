@@ -73,12 +73,70 @@ final class MetricsEngineTests: XCTestCase {
         XCTAssertEqual(sevenDays.topKeys.first?.keyCode, 4)
         XCTAssertEqual(sevenDays.topKeys.first?.count, 2)
     }
+
+    func testSnapshotIncludesPendingWPMAndTopApps() async throws {
+        let store = MockStore()
+        let engine = MetricsEngine(store: store, queryService: store, flushInterval: .seconds(60), flushThreshold: 200)
+
+        await engine.start()
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let events = [
+            KeyEvent(
+                timestamp: now.addingTimeInterval(-50),
+                keyCode: 4,
+                isSeparator: false,
+                deviceClass: .builtIn,
+                appBundleID: "com.apple.TextEdit",
+                appName: "TextEdit"
+            ),
+            KeyEvent(
+                timestamp: now.addingTimeInterval(-49),
+                keyCode: 44,
+                isSeparator: true,
+                deviceClass: .builtIn,
+                appBundleID: "com.apple.TextEdit",
+                appName: "TextEdit"
+            ),
+            KeyEvent(
+                timestamp: now.addingTimeInterval(-20),
+                keyCode: 5,
+                isSeparator: false,
+                deviceClass: .builtIn,
+                appBundleID: "com.apple.dt.Xcode",
+                appName: "Xcode"
+            ),
+            KeyEvent(
+                timestamp: now.addingTimeInterval(-19),
+                keyCode: 44,
+                isSeparator: true,
+                deviceClass: .builtIn,
+                appBundleID: "com.apple.dt.Xcode",
+                appName: "Xcode"
+            )
+        ]
+
+        for event in events {
+            await engine.ingest(event)
+        }
+
+        let snapshot = try await engine.snapshot(for: .h1, now: now)
+
+        XCTAssertEqual(snapshot.totalWords, 2)
+        XCTAssertEqual(snapshot.topAppsByWords.count, 2)
+        XCTAssertEqual(snapshot.topAppsByWords.first?.wordCount, 1)
+        XCTAssertEqual(snapshot.wpmTrendSeries.reduce(0) { $0 + $1.words }, 2)
+    }
 }
 
 private actor MockStore: TypistStore {
     private(set) var flushedEventCount = 0
 
-    func flush(events: [KeyEvent], wordIncrements: [WordIncrement]) async throws {
+    func flush(
+        events: [KeyEvent],
+        wordIncrements: [WordIncrement],
+        activeTypingIncrements: [ActiveTypingIncrement]
+    ) async throws {
         flushedEventCount += events.count
     }
 

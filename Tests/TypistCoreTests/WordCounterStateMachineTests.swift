@@ -31,4 +31,26 @@ final class WordCounterStateMachineTests: XCTestCase {
         XCTAssertFalse(machine.process(event: delete))
         XCTAssertTrue(machine.process(event: returnKey))
     }
+
+    func testPunctuationSeparatorCountsWordBoundary() {
+        var machine = WordCounterStateMachine()
+
+        let letter = KeyEvent(timestamp: Date(), keyCode: 4, isSeparator: false, deviceClass: .builtIn)
+        let period = KeyEvent(timestamp: Date(), keyCode: 55, isSeparator: true, deviceClass: .builtIn)
+
+        XCTAssertFalse(machine.process(event: letter))
+        XCTAssertTrue(machine.process(event: period))
+    }
+
+    func testModifierKeysDoNotEndWord() {
+        var machine = WordCounterStateMachine()
+
+        let letter = KeyEvent(timestamp: Date(), keyCode: 4, isSeparator: false, deviceClass: .unknown)
+        let shift = KeyEvent(timestamp: Date(), keyCode: 225, isSeparator: false, deviceClass: .unknown)
+        let space = KeyEvent(timestamp: Date(), keyCode: 44, isSeparator: true, deviceClass: .unknown)
+
+        XCTAssertFalse(machine.process(event: letter))
+        XCTAssertFalse(machine.process(event: shift))
+        XCTAssertTrue(machine.process(event: space))
+    }
 }

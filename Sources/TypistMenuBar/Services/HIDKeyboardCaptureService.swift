@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import IOKit.hid
 import TypistCore
@@ -15,6 +16,9 @@ final class HIDKeyboardCaptureService: KeyboardCaptureProviding {
     private let deviceClassifier = DeviceClassifier()
     private let diagnostics = AppDiagnostics.shared
     private var manager: IOHIDManager?
+    private var cachedProcessID: pid_t?
+    private var cachedAppBundleID: String?
+    private var cachedAppName: String?
     private let runLoopMode = CFRunLoopMode.commonModes.rawValue
 
     init() {
@@ -93,16 +97,37 @@ final class HIDKeyboardCaptureService: KeyboardCaptureProviding {
 
         let device = IOHIDElementGetDevice(element)
         let deviceClass = deviceClassifier.classify(device: device)
+        let frontmostApp = currentFrontmostApp()
 
         let event = KeyEvent(
             timestamp: Date(),
             keyCode: keyCode,
             isSeparator: KeyboardKeyMapper.isSeparator(keyCode),
-            deviceClass: deviceClass
+            deviceClass: deviceClass,
+            appBundleID: frontmostApp.bundleID,
+            appName: frontmostApp.name
         )
 
         diagnostics.recordHIDYieldedEvent(event)
         continuation.yield(event)
+    }
+
+    private func currentFrontmostApp() -> (bundleID: String?, name: String?) {
+        guard let appInfo = FrontmostAppResolver.current() else {
+            cachedProcessID = nil
+            cachedAppBundleID = nil
+            cachedAppName = nil
+            return (bundleID: nil, name: nil)
+        }
+
+        if cachedProcessID == appInfo.processID {
+            return (bundleID: cachedAppBundleID, name: cachedAppName)
+        }
+
+        cachedProcessID = appInfo.processID
+        cachedAppBundleID = appInfo.bundleID
+        cachedAppName = appInfo.name
+        return (bundleID: cachedAppBundleID, name: cachedAppName)
     }
 }
 

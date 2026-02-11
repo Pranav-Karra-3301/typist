@@ -18,7 +18,11 @@ final class MetricsEngineDiagnosticsTests: XCTestCase {
 }
 
 private actor MockStoreForDiagnostics: TypistStore {
-    func flush(events: [KeyEvent], wordIncrements: [WordIncrement]) async throws {}
+    func flush(
+        events: [KeyEvent],
+        wordIncrements: [WordIncrement],
+        activeTypingIncrements: [ActiveTypingIncrement]
+    ) async throws {}
 
     func snapshot(for timeframe: Timeframe, now: Date) async throws -> StatsSnapshot {
         StatsSnapshot.empty(timeframe: timeframe)

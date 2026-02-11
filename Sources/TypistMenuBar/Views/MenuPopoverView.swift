@@ -20,7 +20,11 @@ struct MenuPopoverView: View {
                     sectionDivider
                     timeframeSection
                     sectionDivider
+                    typingSpeedSection
+                    sectionDivider
                     chartSection
+                    sectionDivider
+                    topAppsSection
 
                     if appModel.showHeatmapInPopover {
                         sectionDivider
@@ -86,13 +90,56 @@ struct MenuPopoverView: View {
         }
     }
 
-    private var chartSection: some View {
+    private var typingSpeedSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Activity")
+            Text("Typing speed")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.86))
 
-            TrendChartView(timeframe: appModel.snapshot.timeframe, points: appModel.snapshot.trendSeries)
+            TypingSpeedChartView(
+                timeframe: appModel.snapshot.timeframe,
+                points: appModel.snapshot.typingSpeedTrendSeries
+            )
+        }
+    }
+
+    private var chartSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Word output")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.86))
+
+            TrendChartView(
+                timeframe: appModel.snapshot.timeframe,
+                points: appModel.snapshot.wpmTrendSeries,
+                granularity: appModel.snapshot.timeframe.trendGranularity
+            )
+        }
+    }
+
+    private var topAppsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Top apps by words")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.86))
+
+                Spacer()
+
+                Button("View all") {
+                    appModel.openSettings(tab: .analytics)
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+            }
+
+            AppWordListView(
+                apps: appModel.snapshot.topAppsByWords,
+                maxItems: 5,
+                emptyMessage: "Start typing across apps to build distribution.",
+                style: .popover
+            )
         }
     }
 

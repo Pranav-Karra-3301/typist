@@ -3,6 +3,8 @@
 Typist is an ultra-light macOS menu bar app (macOS 14+) that tracks:
 - Total keystrokes
 - Word counts (privacy-safe boundary heuristic)
+- Typing speed trend (estimated WPM over time)
+- Words per app (bundle-aware app attribution)
 - Per-key frequency
 - Built-in vs external keyboard usage (best-effort, with unknown fallback)
 - Interactive keyboard heatmap (Mac ANSI layout) with per-key drilldown
@@ -41,7 +43,7 @@ swift test
 ## Privacy defaults
 
 - No typed content captured or stored.
-- Only key usage metadata is persisted locally.
+- Only key usage metadata (counts, timestamps, device class, and app identity) is persisted locally.
 - 90-day event ring buffer with long-term aggregate tables.
 
 ## Performance and battery validation

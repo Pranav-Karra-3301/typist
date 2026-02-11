@@ -24,6 +24,12 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Keyboard", systemImage: "square.grid.3x2")
                 }
+
+            analyticsTab
+                .tag(SettingsTab.analytics)
+                .tabItem {
+                    Label("Analytics", systemImage: "chart.xyaxis.line")
+                }
         }
         .padding(16)
         .frame(minWidth: 720, minHeight: 560)
@@ -59,7 +65,7 @@ struct SettingsView: View {
                     subtitle: "What Typist stores locally"
                 ) {
                     Text("• Typed text is never stored.")
-                    Text("• Only key usage counts, timestamps, and device class are persisted.")
+                    Text("• Only key usage counts, timestamps, app identity, and device class are persisted.")
                     Text("• A 90-day event ring buffer is retained for aggregation integrity.")
                 }
 
@@ -149,6 +155,53 @@ struct SettingsView: View {
                             showSelectedDetails: true
                         )
                     }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var analyticsTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                settingsGroup(
+                    title: "Typing Speed",
+                    subtitle: "Actual words per minute based on active typing time"
+                ) {
+                    Picker("Timeframe", selection: $appModel.selectedTimeframe) {
+                        ForEach(Timeframe.allCases, id: \.self) { timeframe in
+                            Text(timeframe.title).tag(timeframe)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    TypingSpeedChartView(
+                        timeframe: appModel.snapshot.timeframe,
+                        points: appModel.snapshot.typingSpeedTrendSeries
+                    )
+                }
+
+                settingsGroup(
+                    title: "Word Output",
+                    subtitle: "Words typed per time bucket"
+                ) {
+                    TrendChartView(
+                        timeframe: appModel.snapshot.timeframe,
+                        points: appModel.snapshot.wpmTrendSeries,
+                        granularity: appModel.snapshot.timeframe.trendGranularity
+                    )
+                }
+
+                settingsGroup(
+                    title: "Words by App",
+                    subtitle: "Attributed at word boundary (space/return/punctuation)"
+                ) {
+                    AppWordListView(
+                        apps: appModel.snapshot.topAppsByWords,
+                        maxItems: 20,
+                        emptyMessage: "Start typing in different apps to populate this list.",
+                        style: .settings
+                    )
                 }
             }
             .padding(.vertical, 4)

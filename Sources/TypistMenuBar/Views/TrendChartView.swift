@@ -4,7 +4,15 @@ import TypistCore
 
 struct TrendChartView: View {
     let timeframe: Timeframe
-    let points: [TrendPoint]
+    let points: [WPMTrendPoint]
+    let granularity: TimeBucketGranularity
+
+    private var rateLabel: String {
+        switch granularity {
+        case .hour: return "W/hr"
+        case .day: return "W/day"
+        }
+    }
 
     var body: some View {
         if points.isEmpty {
@@ -12,7 +20,7 @@ struct TrendChartView: View {
                 .fill(Color.white.opacity(0.04))
                 .frame(height: 88)
                 .overlay {
-                    Text("No data yet")
+                    Text("No speed data yet")
                         .foregroundStyle(.secondary)
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                 }
@@ -20,7 +28,7 @@ struct TrendChartView: View {
             Chart(points) { point in
                 AreaMark(
                     x: .value("Time", point.bucketStart),
-                    y: .value("Keys", point.count)
+                    y: .value("Rate", point.rate)
                 )
                 .foregroundStyle(
                     LinearGradient(
@@ -32,7 +40,7 @@ struct TrendChartView: View {
 
                 LineMark(
                     x: .value("Time", point.bucketStart),
-                    y: .value("Keys", point.count)
+                    y: .value("Rate", point.rate)
                 )
                 .foregroundStyle(Color.white.opacity(0.82))
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -46,7 +54,11 @@ struct TrendChartView: View {
                 AxisMarks(position: .trailing)
             }
             .chartXAxisLabel(position: .bottom, alignment: .leading) {}
-            .chartYAxisLabel(position: .trailing, alignment: .top) {}
+            .chartYAxisLabel(position: .trailing, alignment: .top) {
+                Text(rateLabel)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
             .frame(height: 88)
         }
     }

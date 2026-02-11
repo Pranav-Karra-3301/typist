@@ -6,9 +6,41 @@ public enum DeviceClass: String, Codable, CaseIterable, Sendable {
     case unknown
 }
 
+public enum AppIdentity {
+    public static let unknownBundleID = "unknown.app"
+    public static let unknownAppName = "Unknown App"
+
+    public static func normalize(bundleID: String?, appName: String?) -> (bundleID: String, appName: String) {
+        let normalizedBundleID: String
+        if let bundleID, !bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            normalizedBundleID = bundleID
+        } else {
+            normalizedBundleID = unknownBundleID
+        }
+
+        let normalizedAppName: String
+        if let appName, !appName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            normalizedAppName = appName
+        } else if normalizedBundleID != unknownBundleID {
+            normalizedAppName = normalizedBundleID
+        } else {
+            normalizedAppName = unknownAppName
+        }
+
+        return (normalizedBundleID, normalizedAppName)
+    }
+}
+
 public enum TimeBucketGranularity: Sendable {
     case hour
     case day
+
+    public var bucketMinutes: Double {
+        switch self {
+        case .hour: return 60
+        case .day: return 1_440
+        }
+    }
 }
 
 public enum Timeframe: String, CaseIterable, Sendable {
@@ -91,22 +123,42 @@ public struct KeyEvent: Sendable, Hashable {
     public let keyCode: Int
     public let isSeparator: Bool
     public let deviceClass: DeviceClass
+    public let appBundleID: String?
+    public let appName: String?
 
-    public init(timestamp: Date, keyCode: Int, isSeparator: Bool, deviceClass: DeviceClass) {
+    public init(
+        timestamp: Date,
+        keyCode: Int,
+        isSeparator: Bool,
+        deviceClass: DeviceClass,
+        appBundleID: String? = nil,
+        appName: String? = nil
+    ) {
         self.timestamp = timestamp
         self.keyCode = keyCode
         self.isSeparator = isSeparator
         self.deviceClass = deviceClass
+        self.appBundleID = appBundleID
+        self.appName = appName
     }
 }
 
 public struct WordIncrement: Sendable, Hashable {
     public let timestamp: Date
     public let deviceClass: DeviceClass
+    public let appBundleID: String?
+    public let appName: String?
 
-    public init(timestamp: Date, deviceClass: DeviceClass) {
+    public init(
+        timestamp: Date,
+        deviceClass: DeviceClass,
+        appBundleID: String? = nil,
+        appName: String? = nil
+    ) {
         self.timestamp = timestamp
         self.deviceClass = deviceClass
+        self.appBundleID = appBundleID
+        self.appName = appName
     }
 }
 
@@ -119,6 +171,62 @@ public struct TrendPoint: Sendable, Hashable, Identifiable {
     public init(bucketStart: Date, count: Int) {
         self.bucketStart = bucketStart
         self.count = count
+    }
+}
+
+public struct WPMTrendPoint: Sendable, Hashable, Identifiable {
+    public let bucketStart: Date
+    public let words: Int
+    public let rate: Double
+
+    public var id: TimeInterval { bucketStart.timeIntervalSince1970 }
+
+    public init(bucketStart: Date, words: Int, rate: Double) {
+        self.bucketStart = bucketStart
+        self.words = words
+        self.rate = rate
+    }
+}
+
+public struct TypingSpeedTrendPoint: Sendable, Hashable, Identifiable {
+    public let bucketStart: Date
+    public let words: Int
+    public let activeSeconds: Double
+    public let wpm: Double
+
+    public var id: TimeInterval { bucketStart.timeIntervalSince1970 }
+
+    public init(bucketStart: Date, words: Int, activeSeconds: Double) {
+        self.bucketStart = bucketStart
+        self.words = words
+        self.activeSeconds = activeSeconds
+        // Calculate actual WPM: words / (active minutes)
+        // If no active time, WPM is 0
+        self.wpm = activeSeconds > 0 ? Double(words) / (activeSeconds / 60.0) : 0
+    }
+}
+
+public struct ActiveTypingIncrement: Sendable, Hashable {
+    public let bucketStart: Date
+    public let activeSeconds: Double
+
+    public init(bucketStart: Date, activeSeconds: Double) {
+        self.bucketStart = bucketStart
+        self.activeSeconds = activeSeconds
+    }
+}
+
+public struct AppWordStat: Sendable, Hashable, Identifiable {
+    public let bundleID: String
+    public let appName: String
+    public let wordCount: Int
+
+    public var id: String { bundleID }
+
+    public init(bundleID: String, appName: String, wordCount: Int) {
+        self.bundleID = bundleID
+        self.appName = appName
+        self.wordCount = wordCount
     }
 }
 
@@ -156,6 +264,9 @@ public struct StatsSnapshot: Sendable, Hashable {
     public var keyDistribution: [TopKeyStat]
     public var topKeys: [TopKeyStat]
     public var trendSeries: [TrendPoint]
+    public var wpmTrendSeries: [WPMTrendPoint]
+    public var typingSpeedTrendSeries: [TypingSpeedTrendPoint]
+    public var topAppsByWords: [AppWordStat]
 
     public init(
         timeframe: Timeframe,
@@ -164,7 +275,10 @@ public struct StatsSnapshot: Sendable, Hashable {
         deviceBreakdown: DeviceBreakdown,
         keyDistribution: [TopKeyStat],
         topKeys: [TopKeyStat],
-        trendSeries: [TrendPoint]
+        trendSeries: [TrendPoint],
+        wpmTrendSeries: [WPMTrendPoint] = [],
+        typingSpeedTrendSeries: [TypingSpeedTrendPoint] = [],
+        topAppsByWords: [AppWordStat] = []
     ) {
         self.timeframe = timeframe
         self.totalKeystrokes = totalKeystrokes
@@ -173,6 +287,9 @@ public struct StatsSnapshot: Sendable, Hashable {
         self.keyDistribution = keyDistribution
         self.topKeys = topKeys
         self.trendSeries = trendSeries
+        self.wpmTrendSeries = wpmTrendSeries
+        self.typingSpeedTrendSeries = typingSpeedTrendSeries
+        self.topAppsByWords = topAppsByWords
     }
 
     public static func empty(timeframe: Timeframe) -> StatsSnapshot {
@@ -183,7 +300,10 @@ public struct StatsSnapshot: Sendable, Hashable {
             deviceBreakdown: DeviceBreakdown(builtIn: 0, external: 0, unknown: 0),
             keyDistribution: [],
             topKeys: [],
-            trendSeries: []
+            trendSeries: [],
+            wpmTrendSeries: [],
+            typingSpeedTrendSeries: [],
+            topAppsByWords: []
         )
     }
 }
@@ -195,7 +315,11 @@ public protocol KeyboardCaptureProviding {
 }
 
 public protocol PersistenceWriting: Sendable {
-    func flush(events: [KeyEvent], wordIncrements: [WordIncrement]) async throws
+    func flush(
+        events: [KeyEvent],
+        wordIncrements: [WordIncrement],
+        activeTypingIncrements: [ActiveTypingIncrement]
+    ) async throws
 }
 
 public protocol StatsQuerying: Sendable {
