@@ -70,6 +70,71 @@ struct SettingsView: View {
                 }
 
                 settingsGroup(
+                    title: "Install & Security (Unsigned Build)",
+                    subtitle: "How to open Typist if Gatekeeper blocks launch"
+                ) {
+                    Text("• Homebrew and direct DMG install the same app bundle.")
+                    Text("• Homebrew cannot add Apple notarization or trust.")
+                    Text("• If blocked, right-click Typist.app and choose Open.")
+                    Text("• Terminal fallback:")
+                    Text("xattr -dr com.apple.quarantine /Applications/Typist.app")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+
+                    HStack(spacing: 10) {
+                        Button("Copy Fix Command") {
+                            appModel.copyUnsignedInstallCommandsToClipboard()
+                        }
+                        .buttonStyle(.bordered)
+
+                        if appModel.showUnsignedInstallNotice {
+                            Button("Dismiss Startup Reminder") {
+                                appModel.dismissUnsignedInstallNotice()
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+
+                settingsGroup(
+                    title: "Updates",
+                    subtitle: "Automatic checks for new beta releases"
+                ) {
+                    Toggle(
+                        "Automatically check for updates",
+                        isOn: Binding(
+                            get: { appModel.autoCheckUpdates },
+                            set: { appModel.autoCheckUpdates = $0 }
+                        )
+                    )
+
+                    HStack(spacing: 10) {
+                        Button(appModel.isCheckingForUpdates ? "Checking…" : "Check for Updates…") {
+                            Task {
+                                await appModel.checkForUpdates(userInitiated: true)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(appModel.isCheckingForUpdates)
+
+                        if appModel.latestVersionLabel != nil {
+                            Button("Open Latest Release") {
+                                appModel.openLatestReleasePage()
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        Spacer()
+                    }
+
+                    Text(appModel.updateStatusText)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                settingsGroup(
                     title: "Actions",
                     subtitle: "Maintenance and permissions"
                 ) {

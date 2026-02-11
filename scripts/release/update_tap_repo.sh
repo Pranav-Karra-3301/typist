@@ -33,6 +33,12 @@ cask "typist" do
 
   depends_on macos: ">= :sonoma"
   app "Typist.app"
+
+  caveats <<~EOS
+    Typist beta builds are currently unsigned and not notarized.
+    If macOS blocks launch, right-click Typist.app and choose Open, or run:
+      xattr -dr com.apple.quarantine /Applications/Typist.app
+  EOS
 end
 EOF
 

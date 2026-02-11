@@ -16,12 +16,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let metricsEngine = MetricsEngine(store: store, queryService: store)
             let captureService = HIDKeyboardCaptureService()
             let launchManager = LaunchAtLoginManager()
+            let updateService = UpdateService.makeDefault()
 
             let model = AppModel(
                 metricsEngine: metricsEngine,
                 store: store,
                 captureService: captureService,
-                launchAtLoginManager: launchManager
+                launchAtLoginManager: launchManager,
+                updateService: updateService
             )
 
             let controller = MenuBarController(appModel: model)

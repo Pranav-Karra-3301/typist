@@ -75,6 +75,16 @@ jobs:
         run: |
           version="${{ steps.version.outputs.version }}"
           latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          unsigned_note="⚠️ This build is unsigned and not notarized. If macOS blocks launch, right-click Typist.app and choose Open, or run: xattr -dr com.apple.quarantine /Applications/Typist.app"
+          signed_note="✅ This build is signed and notarized."
+
+          if [[ -n "${APPLE_DEVELOPER_ID_CERT_P12_BASE64}" && -n "${APPLE_DEVELOPER_ID_CERT_PASSWORD}" && -n "${APPLE_API_KEY_ID}" && -n "${APPLE_API_ISSUER_ID}" && -n "${APPLE_API_PRIVATE_KEY_P8}" ]]; then
+            security_note="$signed_note"
+          else
+            security_note="$unsigned_note"
+          fi
+
+          release_note_block="$security_note"$'\n\n'"Homebrew installs the same artifact and does not add notarization trust."
           release_args=(
             "v${version}"
             "dist/Typist-${version}.dmg"
@@ -82,6 +92,7 @@ jobs:
             --target "${{ github.sha }}"
             --title "Typist v${version}"
             --generate-notes
+            --notes "$release_note_block"
             --prerelease
           )
 

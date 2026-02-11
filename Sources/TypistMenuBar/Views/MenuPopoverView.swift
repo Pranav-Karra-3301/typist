@@ -17,6 +17,12 @@ struct MenuPopoverView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     headerSection
+
+                    if appModel.showUnsignedInstallNotice {
+                        sectionDivider
+                        unsignedInstallNoticeSection
+                    }
+
                     sectionDivider
                     timeframeSection
                     sectionDivider
@@ -289,6 +295,42 @@ struct MenuPopoverView: View {
         }
     }
 
+    private var unsignedInstallNoticeSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Unsigned install notice")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.88))
+
+            Text("This beta build is unsigned and not notarized. If macOS blocks launch, right-click Typist.app and choose Open.")
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.72))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Button("Copy Fix Command") {
+                    appModel.copyUnsignedInstallCommandsToClipboard()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button("Dismiss") {
+                    appModel.dismissUnsignedInstallNotice()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.orange.opacity(0.13))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.orange.opacity(0.32), lineWidth: 0.7)
+        )
+    }
+
     private var menuActionRows: some View {
         VStack(spacing: 0) {
             menuActionButton(title: "More") {
@@ -300,6 +342,15 @@ struct MenuPopoverView: View {
             menuActionButton(title: "Settings…") {
                 appModel.openSettings()
             }
+
+            Divider().overlay(Color.white.opacity(0.08))
+
+            menuActionButton(title: appModel.isCheckingForUpdates ? "Checking for Updates…" : "Check for Updates…") {
+                Task {
+                    await appModel.checkForUpdates(userInitiated: true)
+                }
+            }
+            .disabled(appModel.isCheckingForUpdates)
 
             Divider().overlay(Color.white.opacity(0.08))
 

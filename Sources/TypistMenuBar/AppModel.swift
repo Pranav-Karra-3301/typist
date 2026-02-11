@@ -67,6 +67,12 @@ final class AppModel: ObservableObject {
         static let statusIconMonochrome = "typist.statusIconMonochrome"
         static let showHeatmapInPopover = "typist.showHeatmapInPopover"
         static let showDiagnosticsInPopover = "typist.showDiagnosticsInPopover"
+        static let hasShownUnsignedInstallNotice = "typist.hasShownUnsignedInstallNotice"
+        static let didDismissUnsignedInstallNotice = "typist.didDismissUnsignedInstallNotice"
+        static let autoCheckUpdates = "typist.autoCheckUpdates"
+        static let updateCheckIntervalHours = "typist.updateCheckIntervalHours"
+        static let lastUpdateCheckAt = "typist.lastUpdateCheckAt"
+        static let lastPromptedUpdateTag = "typist.lastPromptedUpdateTag"
     }
 
     @Published var selectedTimeframe: Timeframe = .h12 {
@@ -88,6 +94,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchErrorMessage: String?
     @Published private(set) var debugSummary = "Diagnostics loading…"
     @Published private(set) var debugLines: [String] = []
+    @Published private(set) var showUnsignedInstallNotice = false
+    @Published private(set) var isCheckingForUpdates = false
+    @Published private(set) var updateStatusText = "Updates have not been checked yet."
+    @Published private(set) var latestVersionLabel: String?
+    @Published private(set) var lastUpdateCheckDate: Date?
 
     @Published var statusIconStyle: StatusIconStyle {
         didSet {
@@ -129,6 +140,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @Published var autoCheckUpdates: Bool {
+        didSet {
+            UserDefaults.standard.set(autoCheckUpdates, forKey: DefaultsKey.autoCheckUpdates)
+        }
+    }
+
     var statusItemStateHandler: ((StatusItemState) -> Void)?
     var openSettingsHandler: (() -> Void)?
 
@@ -136,6 +153,7 @@ final class AppModel: ObservableObject {
     private let store: StatsResetting
     private let captureService: KeyboardCaptureProviding
     private let launchAtLoginManager: LaunchAtLoginManager
+    private let updateService: any UpdateChecking
     private let diagnostics = AppDiagnostics.shared
 
     private var captureTask: Task<Void, Never>?
@@ -144,6 +162,8 @@ final class AppModel: ObservableObject {
     private var snapshotRefreshCount = 0
     private var latestStatusKeystrokes = 0
     private var latestStatusWords = 0
+    private var latestReleaseURL: URL?
+    private let autoUpdateCheckIntervalHours: Double
 
     private static let countFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -155,7 +175,8 @@ final class AppModel: ObservableObject {
         metricsEngine: MetricsEngine,
         store: StatsResetting,
         captureService: KeyboardCaptureProviding,
-        launchAtLoginManager: LaunchAtLoginManager
+        launchAtLoginManager: LaunchAtLoginManager,
+        updateService: any UpdateChecking
     ) {
         let defaults = UserDefaults.standard
 
@@ -163,6 +184,7 @@ final class AppModel: ObservableObject {
         self.store = store
         self.captureService = captureService
         self.launchAtLoginManager = launchAtLoginManager
+        self.updateService = updateService
         self.snapshot = .empty(timeframe: .h12)
         self.launchAtLoginEnabled = launchAtLoginManager.isEnabled
 
@@ -172,6 +194,21 @@ final class AppModel: ObservableObject {
         self.statusIconMonochrome = Self.boolDefault(forKey: DefaultsKey.statusIconMonochrome, defaultValue: true)
         self.showHeatmapInPopover = Self.boolDefault(forKey: DefaultsKey.showHeatmapInPopover, defaultValue: true)
         self.showDiagnosticsInPopover = Self.boolDefault(forKey: DefaultsKey.showDiagnosticsInPopover, defaultValue: true)
+        self.autoCheckUpdates = Self.boolDefault(forKey: DefaultsKey.autoCheckUpdates, defaultValue: true)
+        self.showUnsignedInstallNotice = Self.shouldDisplayUnsignedInstallNotice(defaults: defaults)
+        self.lastUpdateCheckDate = defaults.object(forKey: DefaultsKey.lastUpdateCheckAt) as? Date
+        self.autoUpdateCheckIntervalHours = Self.doubleDefault(
+            forKey: DefaultsKey.updateCheckIntervalHours,
+            defaultValue: 24
+        )
+
+        if showUnsignedInstallNotice {
+            defaults.set(true, forKey: DefaultsKey.hasShownUnsignedInstallNotice)
+        }
+
+        if let lastUpdateCheckDate {
+            self.updateStatusText = "Last checked \(Self.relativeDateFormatter.localizedString(for: lastUpdateCheckDate, relativeTo: Date()))."
+        }
     }
 
     func start() async {
@@ -190,6 +227,12 @@ final class AppModel: ObservableObject {
         await refreshStatusItemCounts()
         await refreshDiagnostics()
         startStatusRefreshLoop()
+
+        if shouldRunAutomaticUpdateCheck(now: Date()) {
+            Task { [weak self] in
+                await self?.checkForUpdates(userInitiated: false)
+            }
+        }
     }
 
     func shutdown() async {
@@ -295,6 +338,66 @@ final class AppModel: ObservableObject {
             diagnostics.mark("Copied diagnostics report to clipboard")
             await refreshDiagnostics()
         }
+    }
+
+    func copyUnsignedInstallCommandsToClipboard() {
+        let commands = Self.unsignedInstallCommands()
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(commands, forType: .string)
+        diagnostics.mark("Copied unsigned install command to clipboard")
+    }
+
+    func dismissUnsignedInstallNotice() {
+        guard showUnsignedInstallNotice else { return }
+        UserDefaults.standard.set(true, forKey: DefaultsKey.didDismissUnsignedInstallNotice)
+        showUnsignedInstallNotice = false
+    }
+
+    func checkForUpdates(userInitiated: Bool) async {
+        guard !isCheckingForUpdates else { return }
+
+        isCheckingForUpdates = true
+        defer { isCheckingForUpdates = false }
+
+        diagnostics.mark("Checking for updates (userInitiated=\(userInitiated))")
+        let result = await updateService.checkForUpdates(channel: .beta)
+
+        switch result {
+        case let .upToDate(current, checkedAt):
+            latestVersionLabel = current.description
+            latestReleaseURL = nil
+            recordUpdateCheckDate(checkedAt)
+            updateStatusText = "Up to date (\(current.description)). Last checked \(Self.relativeDateFormatter.localizedString(for: checkedAt, relativeTo: Date()))."
+            diagnostics.mark("No update available (current=\(current.description))")
+            if userInitiated {
+                showUpToDateAlert(current: current)
+            }
+
+        case let .updateAvailable(current, latest, checkedAt):
+            latestVersionLabel = latest.version.description
+            latestReleaseURL = latest.htmlURL
+            recordUpdateCheckDate(checkedAt)
+            updateStatusText = "Update available: \(latest.version.description) (current \(current.description))."
+            diagnostics.mark("Update available (current=\(current.description), latest=\(latest.version.description))")
+            let shouldShowPrompt = userInitiated || shouldPromptForUpdate(tag: latest.tag)
+            if shouldShowPrompt {
+                markPromptedUpdateTag(latest.tag)
+                showUpdateAvailableAlert(current: current, latest: latest)
+            }
+
+        case let .unavailable(reason, checkedAt):
+            recordUpdateCheckDate(checkedAt)
+            updateStatusText = reason.userMessage
+            diagnostics.mark("Update check unavailable: \(reason.userMessage)")
+            if userInitiated {
+                showUpdateErrorAlert(reason: reason)
+            }
+        }
+    }
+
+    func openLatestReleasePage() {
+        NSWorkspace.shared.open(latestReleaseURL ?? updateService.releasesPageURL)
     }
 
     private func startCapture() async {
@@ -478,10 +581,114 @@ final class AppModel: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
+    private func shouldRunAutomaticUpdateCheck(now: Date) -> Bool {
+        UpdateCheckSchedule.shouldRunAutoCheck(
+            enabled: autoCheckUpdates,
+            lastCheckedAt: lastUpdateCheckDate,
+            now: now,
+            intervalHours: autoUpdateCheckIntervalHours
+        )
+    }
+
+    private func recordUpdateCheckDate(_ date: Date) {
+        lastUpdateCheckDate = date
+        UserDefaults.standard.set(date, forKey: DefaultsKey.lastUpdateCheckAt)
+    }
+
+    private func shouldPromptForUpdate(tag: String) -> Bool {
+        let lastPromptedTag = UserDefaults.standard.string(forKey: DefaultsKey.lastPromptedUpdateTag)
+        return lastPromptedTag != tag
+    }
+
+    private func markPromptedUpdateTag(_ tag: String) {
+        UserDefaults.standard.set(tag, forKey: DefaultsKey.lastPromptedUpdateTag)
+    }
+
+    private func showUpToDateAlert(current: AppVersion) {
+        let alert = NSAlert()
+        alert.messageText = "Typist is up to date"
+        alert.informativeText = "You are running Typist \(current.description)."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    private func showUpdateAvailableAlert(current: AppVersion, latest: UpdateRelease) {
+        let alert = NSAlert()
+        alert.messageText = "Update Available"
+        alert.informativeText = """
+        Typist \(latest.version.description) is available (you have \(current.description)).
+
+        \(Self.releaseNotesSnippet(from: latest.notes))
+
+        If you installed Typist via Homebrew, run:
+        brew upgrade --cask typist
+        """
+        alert.addButton(withTitle: "Download Update")
+        alert.addButton(withTitle: "Not Now")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(latest.htmlURL)
+        }
+    }
+
+    private func showUpdateErrorAlert(reason: UpdateCheckError) {
+        let alert = NSAlert()
+        alert.messageText = "Update Check Failed"
+        alert.informativeText = reason.userMessage
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     private static func boolDefault(forKey key: String, defaultValue: Bool) -> Bool {
         if let value = UserDefaults.standard.object(forKey: key) as? Bool {
             return value
         }
         return defaultValue
     }
+
+    private static func doubleDefault(forKey key: String, defaultValue: Double) -> Double {
+        if let value = UserDefaults.standard.object(forKey: key) as? Double {
+            return value
+        }
+        return defaultValue
+    }
+
+    private static func shouldDisplayUnsignedInstallNotice(defaults: UserDefaults) -> Bool {
+        guard !defaults.bool(forKey: DefaultsKey.didDismissUnsignedInstallNotice) else {
+            return false
+        }
+
+        return Bundle.main.bundleURL.pathExtension.lowercased() == "app"
+    }
+
+    private static func unsignedInstallCommands() -> String {
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Typist"
+        return "xattr -dr com.apple.quarantine /Applications/\(appName).app"
+    }
+
+    private static func releaseNotesSnippet(from notes: String) -> String {
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "Release notes are available on GitHub."
+        }
+
+        let lines = trimmed
+            .split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        guard !lines.isEmpty else {
+            return "Release notes are available on GitHub."
+        }
+
+        let snippet = lines.prefix(4).joined(separator: "\n")
+        return lines.count > 4 ? "\(snippet)\n…" : snippet
+    }
+
+    private static let relativeDateFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
 }

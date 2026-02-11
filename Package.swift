@@ -30,6 +30,10 @@ let package = Package(
         .testTarget(
             name: "TypistCoreTests",
             dependencies: ["TypistCore"]
+        ),
+        .testTarget(
+            name: "TypistMenuBarTests",
+            dependencies: ["TypistMenuBar"]
         )
     ]
 )

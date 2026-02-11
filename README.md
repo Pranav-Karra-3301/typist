@@ -11,6 +11,29 @@ Typist is an ultra-light macOS menu bar app (macOS 14+) that tracks:
 
 It stores only local aggregate metrics and never stores typed text.
 
+## Install (beta)
+
+Homebrew (recommended):
+
+```bash
+brew tap Pranav-Karra-3301/typist
+brew install --cask typist
+```
+
+Direct download:
+
+- `https://github.com/Pranav-Karra-3301/typist/releases`
+
+Unsigned build notice:
+
+- Current public beta releases are unsigned/unnotarized.
+- If macOS blocks launch, right-click `Typist.app` and choose **Open**.
+- Terminal fallback:
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/Typist.app
+  ```
+- Homebrew installs the same artifact and does not add notarization trust.
+
 ## Run
 
 ```bash
@@ -75,7 +98,9 @@ If counters stop updating, open the popover and check the **Diagnostics** sectio
 
 Use **Copy Debug** to copy a full diagnostics report (pipeline counters + recent log lines) to your clipboard.
 
-## Packaging (direct-download path)
+## Packaging (signed path, optional)
+
+If you later enroll in Apple Developer Program, you can produce signed/notarized releases:
 
 1. Open package in Xcode.
 2. Archive with a Developer ID signing identity.
@@ -87,7 +112,7 @@ This repo includes GitHub Actions workflows for:
 
 - CI on PRs/pushes (`.github/workflows/ci.yml`)
 - Manual beta release publishing (`.github/workflows/release-beta.yml`)
-- Signed + notarized DMG release assets
+- Styled DMG release assets (with optional signing/notarization)
 - Automatic Homebrew cask updates in a separate tap repo
 
 See `docs/release.md` for full setup (required secrets/variables, tap repo wiring, and release runbook).
