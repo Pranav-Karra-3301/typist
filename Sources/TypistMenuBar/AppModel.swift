@@ -61,6 +61,7 @@ struct StatusItemState {
 final class AppModel: ObservableObject {
     private enum DefaultsKey {
         static let didAttemptPermissionPrompt = "typist.didAttemptPermissionPrompt"
+        static let selectedTimeframe = "typist.selectedTimeframe"
         static let statusIconStyle = "typist.statusIconStyle"
         static let showStatusTextCount = "typist.showStatusTextCount"
         static let statusTextMetric = "typist.statusTextMetric"
@@ -77,6 +78,7 @@ final class AppModel: ObservableObject {
 
     @Published var selectedTimeframe: Timeframe = .h12 {
         didSet {
+            UserDefaults.standard.set(selectedTimeframe.rawValue, forKey: DefaultsKey.selectedTimeframe)
             selectedHeatmapKeyCode = nil
             let timeframe = selectedTimeframe
             Task { await refreshSelectedTimeframe(for: timeframe) }
@@ -179,13 +181,17 @@ final class AppModel: ObservableObject {
         updateService: any UpdateChecking
     ) {
         let defaults = UserDefaults.standard
+        let initialTimeframe = Timeframe(
+            rawValue: defaults.string(forKey: DefaultsKey.selectedTimeframe) ?? ""
+        ) ?? .h12
 
         self.metricsEngine = metricsEngine
         self.store = store
         self.captureService = captureService
         self.launchAtLoginManager = launchAtLoginManager
         self.updateService = updateService
-        self.snapshot = .empty(timeframe: .h12)
+        self.selectedTimeframe = initialTimeframe
+        self.snapshot = .empty(timeframe: initialTimeframe)
         self.launchAtLoginEnabled = launchAtLoginManager.isEnabled
 
         self.statusIconStyle = StatusIconStyle(rawValue: defaults.string(forKey: DefaultsKey.statusIconStyle) ?? "") ?? .dynamic

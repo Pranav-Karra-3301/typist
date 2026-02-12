@@ -175,14 +175,14 @@ public actor MetricsEngine {
         _ = wordCounters[appID]!.process(event: event)
 
         if wordCommitted {
-            let hourBucket = TimeBucket.startOfHour(for: event.timestamp)
+            let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
             if isPaste {
                 pendingPastedWordsEst += 1
-                pendingPastedWordsByBucket[hourBucket, default: 0] += 1
+                pendingPastedWordsByBucket[fiveMinuteBucket, default: 0] += 1
                 sessions[appID]?.pastedWordsEst += 1
             } else {
                 pendingTypedWords += 1
-                pendingTypedWordsByBucket[hourBucket, default: 0] += 1
+                pendingTypedWordsByBucket[fiveMinuteBucket, default: 0] += 1
                 sessions[appID]?.typedWords += 1
             }
 
@@ -200,23 +200,23 @@ public actor MetricsEngine {
         if let lastTime = lastKeystrokeTime {
             let elapsed = event.timestamp.timeIntervalSince(lastTime)
             if elapsed > 0 && elapsed < config.idleCapFlow {
-                let hourBucket = TimeBucket.startOfHour(for: event.timestamp)
-                pendingActiveTypingByBucket[hourBucket, default: 0] += min(elapsed, config.idleCapFlow)
+                let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
+                pendingActiveTypingByBucket[fiveMinuteBucket, default: 0] += min(elapsed, config.idleCapFlow)
             }
         }
         lastKeystrokeTime = event.timestamp
 
         // Track paste and edit events (total + per-bucket)
         if isPaste {
-            let hourBucket = TimeBucket.startOfHour(for: event.timestamp)
+            let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
             pendingPasteEvents += 1
-            pendingPasteEventsByBucket[hourBucket, default: 0] += 1
+            pendingPasteEventsByBucket[fiveMinuteBucket, default: 0] += 1
             sessions[appID]?.pasteEvents += 1
         }
         if isDelete {
-            let hourBucket = TimeBucket.startOfHour(for: event.timestamp)
+            let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
             pendingEditEvents += 1
-            pendingEditEventsByBucket[hourBucket, default: 0] += 1
+            pendingEditEventsByBucket[fiveMinuteBucket, default: 0] += 1
             sessions[appID]?.editEvents += 1
         }
 
@@ -427,7 +427,7 @@ public actor MetricsEngine {
         // Split across hour boundaries for bucket assignment
         let startWall = lastWall
         let endWall = event.timestamp
-        let intervals = splitAcrossHourBoundaries(
+        let intervals = splitAcrossTimeBoundaries(
             startWall: startWall,
             endWall: endWall,
             flowDelta: flowDelta,
@@ -447,22 +447,21 @@ public actor MetricsEngine {
         sessions[appID]?.lastTextEventTime = event.timestamp
     }
 
-    /// Split time deltas across hour boundaries so each bucket gets its share.
-    private func splitAcrossHourBoundaries(
+    /// Split time deltas across fixed boundaries so each bucket gets its share.
+    private func splitAcrossTimeBoundaries(
         startWall: Date,
         endWall: Date,
         flowDelta: Double,
         skillDelta: Double
     ) -> [(bucket: Date, flowSeconds: Double, skillSeconds: Double)] {
-        let startBucket = TimeBucket.startOfHour(for: startWall)
-        let endBucket = TimeBucket.startOfHour(for: endWall)
+        let startBucket = TimeBucket.start(of: startWall, granularity: .fiveMinutes)
+        let endBucket = TimeBucket.start(of: endWall, granularity: .fiveMinutes)
 
-        // Most common case: same hour
         if startBucket == endBucket {
             return [(bucket: startBucket, flowSeconds: flowDelta, skillSeconds: skillDelta)]
         }
 
-        // Cross-hour: apportion by wall-clock ratio
+        // Cross-boundary: apportion by wall-clock ratio
         let totalWallDelta = endWall.timeIntervalSince(startWall)
         guard totalWallDelta > 0 else {
             return [(bucket: endBucket, flowSeconds: flowDelta, skillSeconds: skillDelta)]
@@ -473,8 +472,8 @@ public actor MetricsEngine {
         var prevBoundary = startWall
 
         while cursor <= endBucket {
-            let nextHour = TimeBucket.advance(cursor, by: .hour)
-            let boundary = min(nextHour, endWall)
+            let nextBoundary = TimeBucket.advance(cursor, by: .fiveMinutes)
+            let boundary = min(nextBoundary, endWall)
             let fraction = boundary.timeIntervalSince(prevBoundary) / totalWallDelta
 
             results.append((
@@ -484,7 +483,7 @@ public actor MetricsEngine {
             ))
 
             prevBoundary = boundary
-            cursor = nextHour
+            cursor = nextBoundary
             if cursor > endBucket { break }
         }
 

@@ -9,9 +9,14 @@ struct TrendChartView: View {
 
     private var rateLabel: String {
         switch granularity {
+        case .fiveMinutes: return "W/5m"
         case .hour: return "W/hr"
         case .day: return "W/day"
         }
+    }
+
+    private var latestRate: Double {
+        points.last(where: { $0.rate > 0 })?.rate ?? 0
     }
 
     var body: some View {
@@ -25,49 +30,56 @@ struct TrendChartView: View {
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                 }
         } else {
-            Chart(points) { point in
-                AreaMark(
-                    x: .value("Time", point.bucketStart),
-                    y: .value("Rate", point.rate)
-                )
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.14), Color.white.opacity(0.02)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Spacer()
+                    if latestRate > 0 {
+                        Text("Now: \(Int(latestRate.rounded()))")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.44))
+                    }
+                }
 
-                LineMark(
-                    x: .value("Time", point.bucketStart),
-                    y: .value("Rate", point.rate)
-                )
-                .foregroundStyle(Color.white.opacity(0.82))
-                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
-                .interpolationMethod(.catmullRom)
-            }
+                Chart(points) { point in
+                    AreaMark(
+                        x: .value("Time", point.bucketStart),
+                        y: .value("Rate", point.rate)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.16), Color.white.opacity(0.0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+
+                    LineMark(
+                        x: .value("Time", point.bucketStart),
+                        y: .value("Rate", point.rate)
+                    )
+                    .foregroundStyle(Color.white.opacity(0.82))
+                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .interpolationMethod(.catmullRom)
+                }
             .chartLegend(.hidden)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 4)) { value in
-                    AxisGridLine()
-                    AxisTick()
-                    AxisValueLabel {
-                        if let date = value.as(Date.self) {
-                            Text(date, format: TypingSpeedChartView.axisDateFormat(for: timeframe))
-                                .font(.system(size: 9, design: .rounded))
+                .chartPlotStyle { plotArea in
+                    plotArea
+                        .background(Color.white.opacity(0.03))
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                        AxisTick()
+                        AxisValueLabel {
+                            if let date = value.as(Date.self) {
+                                Text(date, format: TypingSpeedChartView.axisDateFormat(for: timeframe))
+                                    .font(.system(size: 9, design: .rounded))
+                            }
                         }
                     }
                 }
+                .chartYAxis(.hidden)
+                .frame(height: 88)
             }
-            .chartYAxis {
-                AxisMarks(position: .trailing)
-            }
-            .chartYAxisLabel(position: .trailing, alignment: .top) {
-                Text(rateLabel)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.6))
-            }
-            .frame(height: 88)
         }
     }
 }

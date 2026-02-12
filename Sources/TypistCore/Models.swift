@@ -32,11 +32,13 @@ public enum AppIdentity {
 }
 
 public enum TimeBucketGranularity: Sendable {
+    case fiveMinutes
     case hour
     case day
 
     public var bucketMinutes: Double {
         switch self {
+        case .fiveMinutes: return 5
         case .hour: return 60
         case .day: return 1_440
         }
@@ -64,7 +66,9 @@ public enum Timeframe: String, CaseIterable, Sendable {
 
     public var trendGranularity: TimeBucketGranularity {
         switch self {
-        case .h1, .h12, .h24:
+        case .h1:
+            return .fiveMinutes
+        case .h12, .h24:
             return .hour
         case .d7, .d30, .all:
             return .day
@@ -92,11 +96,22 @@ public enum Timeframe: String, CaseIterable, Sendable {
 public enum TimeBucket {
     public static func start(of date: Date, granularity: TimeBucketGranularity, calendar: Calendar = .current) -> Date {
         switch granularity {
+        case .fiveMinutes:
+            return startOfFiveMinutes(for: date, calendar: calendar)
         case .hour:
             return startOfHour(for: date, calendar: calendar)
         case .day:
             return startOfDay(for: date, calendar: calendar)
         }
+    }
+
+    public static func startOfFiveMinutes(for date: Date, calendar: Calendar = .current) -> Date {
+        var components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        let minute = components.minute ?? 0
+        components.minute = (minute / 5) * 5
+        components.second = 0
+        components.nanosecond = 0
+        return calendar.date(from: components) ?? date
     }
 
     public static func startOfHour(for date: Date, calendar: Calendar = .current) -> Date {
@@ -110,6 +125,8 @@ public enum TimeBucket {
 
     public static func advance(_ date: Date, by granularity: TimeBucketGranularity, calendar: Calendar = .current) -> Date {
         switch granularity {
+        case .fiveMinutes:
+            return calendar.date(byAdding: .minute, value: 5, to: date) ?? date
         case .hour:
             return calendar.date(byAdding: .hour, value: 1, to: date) ?? date
         case .day:

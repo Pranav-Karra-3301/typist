@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let databaseURL = try Self.databaseURL()
+            AppDiagnostics.shared.mark("Using SQLite database at \(databaseURL.path)")
             let store = try SQLiteStore(databaseURL: databaseURL)
             let metricsEngine = MetricsEngine(store: store, queryService: store)
             let captureService = HIDKeyboardCaptureService()

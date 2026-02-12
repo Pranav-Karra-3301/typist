@@ -157,6 +157,48 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(snapshot.wpmTrendSeries.reduce(0) { $0 + $1.words }, 3)
     }
 
+
+    func testOneHourSnapshotUsesFiveMinuteBucketsForSpeedAndWords() async throws {
+        let dbURL = makeDatabaseURL(testName: #function)
+        let store = try SQLiteStore(databaseURL: dbURL, retentionDays: 10_000)
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let wordTimes = [
+            now.addingTimeInterval(-50 * 60),
+            now.addingTimeInterval(-34 * 60),
+            now.addingTimeInterval(-9 * 60)
+        ]
+
+        let events = wordTimes.flatMap { timestamp in
+            [
+                KeyEvent(timestamp: timestamp, keyCode: 4, isSeparator: false, deviceClass: .builtIn),
+                KeyEvent(timestamp: timestamp.addingTimeInterval(1), keyCode: 44, isSeparator: true, deviceClass: .builtIn)
+            ]
+        }
+
+        let words = wordTimes.map { timestamp in
+            WordIncrement(timestamp: timestamp.addingTimeInterval(1), deviceClass: .builtIn)
+        }
+
+        let active: [ActiveTypingIncrement] = [
+            ActiveTypingIncrement(bucketStart: wordTimes[0], activeSeconds: 30, activeSecondsFlow: 30, activeSecondsSkill: 10),
+            ActiveTypingIncrement(bucketStart: wordTimes[1], activeSeconds: 15, activeSecondsFlow: 15, activeSecondsSkill: 8),
+            ActiveTypingIncrement(bucketStart: wordTimes[2], activeSeconds: 60, activeSecondsFlow: 60, activeSecondsSkill: 12)
+        ]
+
+        try await store.flush(events: events, wordIncrements: words, activeTypingIncrements: active)
+
+        let snapshot = try await store.snapshot(for: .h1, now: now)
+        let nonZeroWordBuckets = snapshot.wpmTrendSeries.filter { $0.words > 0 }
+        let nonZeroSpeedBuckets = snapshot.typingSpeedTrendSeries.filter { $0.flowWPM > 0 }
+        let distinctFlowValues = Set(nonZeroSpeedBuckets.map { Int(($0.flowWPM * 10).rounded()) })
+
+        XCTAssertEqual(snapshot.totalWords, 3)
+        XCTAssertEqual(nonZeroWordBuckets.count, 3)
+        XCTAssertEqual(nonZeroSpeedBuckets.count, 3)
+        XCTAssertGreaterThan(distinctFlowValues.count, 1)
+    }
+
     private func makeDatabaseURL(testName: String) -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("typist-tests", isDirectory: true)

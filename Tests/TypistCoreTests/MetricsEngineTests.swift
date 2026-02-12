@@ -127,6 +127,34 @@ final class MetricsEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.topAppsByWords.first?.wordCount, 1)
         XCTAssertEqual(snapshot.wpmTrendSeries.reduce(0) { $0 + $1.words }, 2)
     }
+
+    func testOneHourSnapshotUsesFiveMinuteWordBuckets() async throws {
+        let store = MockStore()
+        let engine = MetricsEngine(store: store, queryService: store, flushInterval: .seconds(60), flushThreshold: 200)
+
+        await engine.start()
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let events = [
+            KeyEvent(timestamp: now.addingTimeInterval(-50 * 60), keyCode: 4, isSeparator: false, deviceClass: .builtIn, monotonicTime: 1),
+            KeyEvent(timestamp: now.addingTimeInterval(-50 * 60 + 1), keyCode: 44, isSeparator: true, deviceClass: .builtIn, monotonicTime: 2),
+            KeyEvent(timestamp: now.addingTimeInterval(-34 * 60), keyCode: 5, isSeparator: false, deviceClass: .builtIn, monotonicTime: 3),
+            KeyEvent(timestamp: now.addingTimeInterval(-34 * 60 + 1), keyCode: 44, isSeparator: true, deviceClass: .builtIn, monotonicTime: 4),
+            KeyEvent(timestamp: now.addingTimeInterval(-9 * 60), keyCode: 6, isSeparator: false, deviceClass: .builtIn, monotonicTime: 5),
+            KeyEvent(timestamp: now.addingTimeInterval(-9 * 60 + 1), keyCode: 44, isSeparator: true, deviceClass: .builtIn, monotonicTime: 6)
+        ]
+
+        for event in events {
+            await engine.ingest(event)
+        }
+
+        let snapshot = try await engine.snapshot(for: .h1, now: now)
+        let nonZeroWordBuckets = snapshot.wpmTrendSeries.filter { $0.words > 0 }
+
+        XCTAssertEqual(snapshot.totalWords, 3)
+        XCTAssertEqual(nonZeroWordBuckets.count, 3)
+    }
+
 }
 
 private actor MockStore: TypistStore {

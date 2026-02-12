@@ -212,21 +212,81 @@ struct MenuPopoverView: View {
     }
 
     private var topKeysSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Most used keys")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.86))
 
-            if appModel.snapshot.topKeys.isEmpty {
+            let topFive = Array(appModel.snapshot.topKeys.prefix(5))
+                .sorted {
+                    if $0.count == $1.count { return $0.keyCode < $1.keyCode }
+                    return $0.count < $1.count
+                }
+
+            if topFive.isEmpty {
                 Text("Start typing to populate key rankings.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(.white.opacity(0.56))
             } else {
-                ForEach(Array(appModel.snapshot.topKeys.prefix(5).enumerated()), id: \.element.id) { index, key in
-                    infoRow(label: "\(index + 1). \(key.keyName)", value: formatCount(key.count))
-                }
+                topKeysBarChart(keys: topFive)
             }
         }
+    }
+
+    private func topKeysBarChart(keys: [TopKeyStat]) -> some View {
+        let maxCount = max(1, keys.map(\.count).max() ?? 1)
+
+        return HStack(alignment: .bottom, spacing: 8) {
+            ForEach(keys) { key in
+                topKeyBar(key, maxCount: maxCount)
+            }
+        }
+    }
+
+    private func topKeyBar(_ key: TopKeyStat, maxCount: Int) -> some View {
+        let maxHeight: CGFloat = 92
+        let normalized = CGFloat(Double(key.count) / Double(maxCount))
+        let fillHeight = max(4, maxHeight * normalized)
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.22))
+                    .frame(height: fillHeight)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(spacing: 2) {
+                Text("\(key.count)")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.black.opacity(0.22))
+                    )
+                    .padding(.top, 5)
+
+                Spacer(minLength: 0)
+
+                Text(key.keyName)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 5)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: maxHeight)
     }
 
     private var diagnosticsSection: some View {

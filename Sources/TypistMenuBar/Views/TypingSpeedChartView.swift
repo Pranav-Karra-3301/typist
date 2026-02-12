@@ -19,6 +19,10 @@ struct TypingSpeedChartView: View {
         return min(Double(totalWords) / (totalSeconds / 60.0), 200)
     }
 
+    private var latestFlowWPM: Double {
+        points.last(where: { $0.flowWPM > 0 })?.flowWPM ?? 0
+    }
+
     var body: some View {
         if !hasData {
             RoundedRectangle(cornerRadius: 8)
@@ -36,6 +40,11 @@ struct TypingSpeedChartView: View {
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.6))
                     Spacer()
+                    if latestFlowWPM > 0 {
+                        Text("Now: \(Int(latestFlowWPM.rounded()))")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.46))
+                    }
                 }
 
                 Chart(points) { point in
@@ -45,7 +54,7 @@ struct TypingSpeedChartView: View {
                     )
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [Color.green.opacity(0.2), Color.green.opacity(0.02)],
+                            colors: [Color.green.opacity(0.22), Color.green.opacity(0.0)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -62,7 +71,7 @@ struct TypingSpeedChartView: View {
                 .chartLegend(.hidden)
                 .chartPlotStyle { plotArea in
                     plotArea
-                        .background(Color.clear)
+                        .background(Color.white.opacity(0.04))
                 }
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 4)) { value in
@@ -75,17 +84,7 @@ struct TypingSpeedChartView: View {
                         }
                     }
                 }
-                .chartYAxis {
-                    AxisMarks(position: .trailing) { _ in
-                        AxisTick()
-                        AxisValueLabel()
-                    }
-                }
-                .chartYAxisLabel(position: .trailing, alignment: .top) {
-                    Text("WPM")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.6))
-                }
+                .chartYAxis(.hidden)
                 .frame(height: 76)
             }
         }

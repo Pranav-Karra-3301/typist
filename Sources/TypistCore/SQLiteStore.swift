@@ -121,10 +121,13 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             try execute("DELETE FROM event_ring_buffer;")
             try execute("DELETE FROM hourly_key_counts;")
             try execute("DELETE FROM daily_key_counts;")
+            try execute("DELETE FROM five_min_word_counts;")
             try execute("DELETE FROM hourly_word_counts;")
             try execute("DELETE FROM daily_word_counts;")
+            try execute("DELETE FROM five_min_app_word_counts;")
             try execute("DELETE FROM hourly_app_word_counts;")
             try execute("DELETE FROM daily_app_word_counts;")
+            try execute("DELETE FROM five_min_typing_stats;")
             try execute("DELETE FROM hourly_typing_stats;")
             try execute("DELETE FROM daily_typing_stats;")
         }
@@ -165,6 +168,16 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             )
             defer { sqlite3_finalize(upsertDailyKey) }
 
+            let upsertFiveMinWord = try prepare(
+                """
+                INSERT INTO five_min_word_counts(bucket_start, device_class, count)
+                VALUES(?, ?, 1)
+                ON CONFLICT(bucket_start, device_class)
+                DO UPDATE SET count = count + 1;
+                """
+            )
+            defer { sqlite3_finalize(upsertFiveMinWord) }
+
             let upsertHourlyWord = try prepare(
                 """
                 INSERT INTO hourly_word_counts(bucket_start, device_class, count)
@@ -184,6 +197,16 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 """
             )
             defer { sqlite3_finalize(upsertDailyWord) }
+
+            let upsertFiveMinAppWord = try prepare(
+                """
+                INSERT INTO five_min_app_word_counts(bucket_start, app_bundle_id, app_name, count)
+                VALUES(?, ?, ?, 1)
+                ON CONFLICT(bucket_start, app_bundle_id)
+                DO UPDATE SET count = count + 1, app_name = excluded.app_name;
+                """
+            )
+            defer { sqlite3_finalize(upsertFiveMinAppWord) }
 
             let upsertHourlyAppWord = try prepare(
                 """
@@ -227,12 +250,18 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             }
 
             for increment in wordIncrements {
+                let fiveMinStart = Int64(TimeBucket.start(of: increment.timestamp, granularity: .fiveMinutes, calendar: calendar).timeIntervalSince1970)
                 let hourStart = Int64(TimeBucket.startOfHour(for: increment.timestamp, calendar: calendar).timeIntervalSince1970)
                 let dayStart = Int64(TimeBucket.startOfDay(for: increment.timestamp, calendar: calendar).timeIntervalSince1970)
                 let appIdentity = AppIdentity.normalize(bundleID: increment.appBundleID, appName: increment.appName)
 
+                try run(upsertFiveMinWord, bindings: [.int64(fiveMinStart), .text(increment.deviceClass.rawValue)])
                 try run(upsertHourlyWord, bindings: [.int64(hourStart), .text(increment.deviceClass.rawValue)])
                 try run(upsertDailyWord, bindings: [.int64(dayStart), .text(increment.deviceClass.rawValue)])
+                try run(
+                    upsertFiveMinAppWord,
+                    bindings: [.int64(fiveMinStart), .text(appIdentity.bundleID), .text(appIdentity.appName)]
+                )
                 try run(
                     upsertHourlyAppWord,
                     bindings: [.int64(hourStart), .text(appIdentity.bundleID), .text(appIdentity.appName)]
@@ -244,48 +273,103 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             }
 
             // Store typing stats (active seconds and word counts for typing speed calculation)
-            // First, aggregate word increments by hour bucket
+            var wordCountByFiveMin: [Int64: Int] = [:]
             var wordCountByHour: [Int64: Int] = [:]
+            var wordCountByDay: [Int64: Int] = [:]
             for increment in wordIncrements {
+                let fiveMinStart = Int64(TimeBucket.start(of: increment.timestamp, granularity: .fiveMinutes, calendar: calendar).timeIntervalSince1970)
                 let hourStart = Int64(TimeBucket.startOfHour(for: increment.timestamp, calendar: calendar).timeIntervalSince1970)
+                let dayStart = Int64(TimeBucket.startOfDay(for: increment.timestamp, calendar: calendar).timeIntervalSince1970)
+                wordCountByFiveMin[fiveMinStart, default: 0] += 1
                 wordCountByHour[hourStart, default: 0] += 1
+                wordCountByDay[dayStart, default: 0] += 1
             }
 
-            // Aggregate active typing by hour and day buckets (including flow/skill and session metrics)
+            var activeSecondsByFiveMin: [Int64: Double] = [:]
             var activeSecondsByHour: [Int64: Double] = [:]
             var activeSecondsByDay: [Int64: Double] = [:]
+            var flowSecondsByFiveMin: [Int64: Double] = [:]
             var flowSecondsByHour: [Int64: Double] = [:]
             var flowSecondsByDay: [Int64: Double] = [:]
+            var skillSecondsByFiveMin: [Int64: Double] = [:]
             var skillSecondsByHour: [Int64: Double] = [:]
             var skillSecondsByDay: [Int64: Double] = [:]
+            var typedWordsByFiveMin: [Int64: Int] = [:]
             var typedWordsByHour: [Int64: Int] = [:]
             var typedWordsByDay: [Int64: Int] = [:]
+            var pastedWordsByFiveMin: [Int64: Int] = [:]
             var pastedWordsByHour: [Int64: Int] = [:]
             var pastedWordsByDay: [Int64: Int] = [:]
+            var pasteEventsByFiveMin: [Int64: Int] = [:]
             var pasteEventsByHour: [Int64: Int] = [:]
             var pasteEventsByDay: [Int64: Int] = [:]
+            var editEventsByFiveMin: [Int64: Int] = [:]
             var editEventsByHour: [Int64: Int] = [:]
             var editEventsByDay: [Int64: Int] = [:]
+
             for increment in activeTypingIncrements {
-                let hourStart = Int64(increment.bucketStart.timeIntervalSince1970)
+                let fiveMinStart = Int64(TimeBucket.start(of: increment.bucketStart, granularity: .fiveMinutes, calendar: calendar).timeIntervalSince1970)
+                let hourStart = Int64(TimeBucket.startOfHour(for: increment.bucketStart, calendar: calendar).timeIntervalSince1970)
                 let dayStart = Int64(TimeBucket.startOfDay(for: increment.bucketStart, calendar: calendar).timeIntervalSince1970)
+
+                activeSecondsByFiveMin[fiveMinStart, default: 0] += increment.activeSeconds
                 activeSecondsByHour[hourStart, default: 0] += increment.activeSeconds
                 activeSecondsByDay[dayStart, default: 0] += increment.activeSeconds
+
+                flowSecondsByFiveMin[fiveMinStart, default: 0] += increment.activeSecondsFlow
                 flowSecondsByHour[hourStart, default: 0] += increment.activeSecondsFlow
                 flowSecondsByDay[dayStart, default: 0] += increment.activeSecondsFlow
+
+                skillSecondsByFiveMin[fiveMinStart, default: 0] += increment.activeSecondsSkill
                 skillSecondsByHour[hourStart, default: 0] += increment.activeSecondsSkill
+                skillSecondsByDay[dayStart, default: 0] += increment.activeSecondsSkill
+
+                typedWordsByFiveMin[fiveMinStart, default: 0] += increment.typedWords
                 typedWordsByHour[hourStart, default: 0] += increment.typedWords
                 typedWordsByDay[dayStart, default: 0] += increment.typedWords
+
+                pastedWordsByFiveMin[fiveMinStart, default: 0] += increment.pastedWordsEst
                 pastedWordsByHour[hourStart, default: 0] += increment.pastedWordsEst
                 pastedWordsByDay[dayStart, default: 0] += increment.pastedWordsEst
+
+                pasteEventsByFiveMin[fiveMinStart, default: 0] += increment.pasteEvents
                 pasteEventsByHour[hourStart, default: 0] += increment.pasteEvents
                 pasteEventsByDay[dayStart, default: 0] += increment.pasteEvents
+
+                editEventsByFiveMin[fiveMinStart, default: 0] += increment.editEvents
                 editEventsByHour[hourStart, default: 0] += increment.editEvents
                 editEventsByDay[dayStart, default: 0] += increment.editEvents
-                skillSecondsByDay[dayStart, default: 0] += increment.activeSecondsSkill
             }
 
-            // Collect all hourly buckets that have any data
+            let allFiveMinBuckets = Set(activeSecondsByFiveMin.keys)
+                .union(wordCountByFiveMin.keys)
+                .union(typedWordsByFiveMin.keys)
+                .union(pastedWordsByFiveMin.keys)
+                .union(pasteEventsByFiveMin.keys)
+                .union(editEventsByFiveMin.keys)
+
+            for fiveMinStart in allFiveMinBuckets {
+                let words = wordCountByFiveMin[fiveMinStart, default: 0]
+                let seconds = activeSecondsByFiveMin[fiveMinStart, default: 0]
+                let flow = flowSecondsByFiveMin[fiveMinStart, default: 0]
+                let skill = skillSecondsByFiveMin[fiveMinStart, default: 0]
+                let tw = typedWordsByFiveMin[fiveMinStart, default: 0]
+                let pw = pastedWordsByFiveMin[fiveMinStart, default: 0]
+                let pe = pasteEventsByFiveMin[fiveMinStart, default: 0]
+                let ee = editEventsByFiveMin[fiveMinStart, default: 0]
+                try execute(
+                    """
+                    INSERT INTO five_min_typing_stats(bucket_start, word_count, active_seconds, active_seconds_flow, active_seconds_skill, typed_words, pasted_words_est, paste_events, edit_events)
+                    VALUES(\(fiveMinStart), \(words), \(seconds), \(flow), \(skill), \(tw), \(pw), \(pe), \(ee))
+                    ON CONFLICT(bucket_start)
+                    DO UPDATE SET word_count = word_count + \(words), active_seconds = active_seconds + \(seconds),
+                    active_seconds_flow = active_seconds_flow + \(flow), active_seconds_skill = active_seconds_skill + \(skill),
+                    typed_words = typed_words + \(tw), pasted_words_est = pasted_words_est + \(pw),
+                    paste_events = paste_events + \(pe), edit_events = edit_events + \(ee);
+                    """
+                )
+            }
+
             let allHourBuckets = Set(activeSecondsByHour.keys)
                 .union(wordCountByHour.keys)
                 .union(typedWordsByHour.keys)
@@ -293,7 +377,6 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 .union(pasteEventsByHour.keys)
                 .union(editEventsByHour.keys)
 
-            // Upsert hourly typing stats
             for hourStart in allHourBuckets {
                 let words = wordCountByHour[hourStart, default: 0]
                 let seconds = activeSecondsByHour[hourStart, default: 0]
@@ -316,14 +399,6 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 )
             }
 
-            // Aggregate word counts by day for daily stats
-            var wordCountByDay: [Int64: Int] = [:]
-            for increment in wordIncrements {
-                let dayStart = Int64(TimeBucket.startOfDay(for: increment.timestamp, calendar: calendar).timeIntervalSince1970)
-                wordCountByDay[dayStart, default: 0] += 1
-            }
-
-            // Collect all daily buckets that have any data
             let allDayBuckets = Set(activeSecondsByDay.keys)
                 .union(wordCountByDay.keys)
                 .union(typedWordsByDay.keys)
@@ -331,7 +406,6 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 .union(pasteEventsByDay.keys)
                 .union(editEventsByDay.keys)
 
-            // Upsert daily typing stats
             for dayStart in allDayBuckets {
                 let words = wordCountByDay[dayStart, default: 0]
                 let seconds = activeSecondsByDay[dayStart, default: 0]
@@ -370,8 +444,23 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
 
         let granularity = timeframe.trendGranularity
         let keyRange = KeyboardKeyMapper.validKeyCodeRange
-        let wordTable = granularity == .hour ? "hourly_word_counts" : "daily_word_counts"
-        let appWordTable = granularity == .hour ? "hourly_app_word_counts" : "daily_app_word_counts"
+        let wordTable: String
+        let appWordTable: String
+        let typingStatsTable: String
+        switch granularity {
+        case .fiveMinutes:
+            wordTable = "five_min_word_counts"
+            appWordTable = "five_min_app_word_counts"
+            typingStatsTable = "five_min_typing_stats"
+        case .hour:
+            wordTable = "hourly_word_counts"
+            appWordTable = "hourly_app_word_counts"
+            typingStatsTable = "hourly_typing_stats"
+        case .day:
+            wordTable = "daily_word_counts"
+            appWordTable = "daily_app_word_counts"
+            typingStatsTable = "daily_typing_stats"
+        }
 
         let startDate = timeframe.startDate(now: now, calendar: calendar)
         let startTimestamp = startDate.map { Int64($0.timeIntervalSince1970) }
@@ -434,7 +523,15 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         }
         let topKeys = Array(keyDistribution.prefix(8))
 
-        let bucketSeconds = granularity == .hour ? 3600 : 86_400
+        let bucketSeconds: Int
+        switch granularity {
+        case .fiveMinutes:
+            bucketSeconds = 300
+        case .hour:
+            bucketSeconds = 3600
+        case .day:
+            bucketSeconds = 86_400
+        }
         let trendRows = try queryRows(
             """
             SELECT (ts / \(bucketSeconds)) * \(bucketSeconds) AS bucket_start, COUNT(*)
@@ -478,7 +575,6 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             bindings: aggregateBindings
         )
 
-        let typingStatsTable = granularity == .hour ? "hourly_typing_stats" : "daily_typing_stats"
         let typingSpeedTrendSeries = fillTypingSpeedTrendIfNeeded(
             points: try queryTypingSpeedTrend(
                 tableName: typingStatsTable,
@@ -896,6 +992,17 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
 
         try execute(
             """
+            CREATE TABLE IF NOT EXISTS five_min_word_counts (
+                bucket_start INTEGER NOT NULL,
+                device_class TEXT NOT NULL,
+                count INTEGER NOT NULL,
+                PRIMARY KEY(bucket_start, device_class)
+            );
+            """
+        )
+
+        try execute(
+            """
             CREATE TABLE IF NOT EXISTS hourly_word_counts (
                 bucket_start INTEGER NOT NULL,
                 device_class TEXT NOT NULL,
@@ -912,6 +1019,18 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 device_class TEXT NOT NULL,
                 count INTEGER NOT NULL,
                 PRIMARY KEY(bucket_start, device_class)
+            );
+            """
+        )
+
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS five_min_app_word_counts (
+                bucket_start INTEGER NOT NULL,
+                app_bundle_id TEXT NOT NULL,
+                app_name TEXT NOT NULL,
+                count INTEGER NOT NULL,
+                PRIMARY KEY(bucket_start, app_bundle_id)
             );
             """
         )
@@ -941,6 +1060,22 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         )
 
         // Typing speed tracking: stores active typing seconds and word count per bucket
+        try execute(
+            """
+            CREATE TABLE IF NOT EXISTS five_min_typing_stats (
+                bucket_start INTEGER NOT NULL PRIMARY KEY,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                active_seconds REAL NOT NULL DEFAULT 0,
+                active_seconds_flow REAL NOT NULL DEFAULT 0,
+                active_seconds_skill REAL NOT NULL DEFAULT 0,
+                typed_words INTEGER NOT NULL DEFAULT 0,
+                pasted_words_est INTEGER NOT NULL DEFAULT 0,
+                paste_events INTEGER NOT NULL DEFAULT 0,
+                edit_events INTEGER NOT NULL DEFAULT 0
+            );
+            """
+        )
+
         try execute(
             """
             CREATE TABLE IF NOT EXISTS hourly_typing_stats (
@@ -999,7 +1134,7 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             "edit_events INTEGER NOT NULL DEFAULT 0"
         ]
 
-        for table in ["hourly_typing_stats", "daily_typing_stats"] {
+        for table in ["five_min_typing_stats", "hourly_typing_stats", "daily_typing_stats"] {
             for columnDef in newColumns {
                 // ALTER TABLE ADD COLUMN is a no-op if column exists (SQLite returns error we ignore)
                 try? execute("ALTER TABLE \(table) ADD COLUMN \(columnDef);")
@@ -1027,7 +1162,10 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         defer { sqlite3_finalize(statement) }
         try run(statement, bindings: [.int64(cutoffTs)])
 
-        // Prune hourly aggregate tables (keep daily tables for long-term history)
+        // Prune short-window aggregate tables (keep daily tables for long-term history)
+        try execute("DELETE FROM five_min_word_counts WHERE bucket_start < \(cutoffTs);")
+        try execute("DELETE FROM five_min_app_word_counts WHERE bucket_start < \(cutoffTs);")
+        try execute("DELETE FROM five_min_typing_stats WHERE bucket_start < \(cutoffTs);")
         try execute("DELETE FROM hourly_key_counts WHERE bucket_start < \(cutoffTs);")
         try execute("DELETE FROM hourly_word_counts WHERE bucket_start < \(cutoffTs);")
         try execute("DELETE FROM hourly_app_word_counts WHERE bucket_start < \(cutoffTs);")
