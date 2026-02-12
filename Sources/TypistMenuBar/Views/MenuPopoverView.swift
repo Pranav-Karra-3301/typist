@@ -6,58 +6,50 @@ struct MenuPopoverView: View {
     @ObservedObject var appModel: AppModel
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
-                )
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                headerSection
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    headerSection
-
-                    if appModel.showUnsignedInstallNotice {
-                        sectionDivider
-                        unsignedInstallNoticeSection
-                    }
-
+                if appModel.showUnsignedInstallNotice {
                     sectionDivider
-                    timeframeSection
-                    sectionDivider
-                    typingSpeedSection
-                    sectionDivider
-                    chartSection
-                    sectionDivider
-                    topAppsSection
-
-                    if appModel.showHeatmapInPopover {
-                        sectionDivider
-                        heatmapSection
-                    }
-
-                    sectionDivider
-                    topKeysSection
-
-                    if appModel.showDiagnosticsInPopover {
-                        sectionDivider
-                        diagnosticsSection
-                    }
-
-                    sectionDivider
-                    metricsSection
-
-                    sectionDivider
-                    footerSection
+                    unsignedInstallNoticeSection
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+
+                sectionDivider
+                timeframeSection
+                sectionDivider
+                typingSpeedSection
+                sectionDivider
+                chartSection
+                sectionDivider
+                topAppsSection
+
+                if appModel.showHeatmapInPopover {
+                    sectionDivider
+                    heatmapSection
+                }
+
+                sectionDivider
+                topKeysSection
+
+                if appModel.showDiagnosticsInPopover {
+                    sectionDivider
+                    diagnosticsSection
+                }
+
+                sectionDivider
+                metricsSection
+
+                sectionDivider
+                footerSection
             }
-            .scrollIndicators(.hidden)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
-        .padding(8)
+        .scrollIndicators(.hidden)
+        .padding(4)
         .frame(width: 344)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var headerSection: some View {

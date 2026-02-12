@@ -60,9 +60,12 @@ struct TypingSpeedChartView: View {
                     .interpolationMethod(.catmullRom)
                 }
                 .chartLegend(.hidden)
+                .chartPlotStyle { plotArea in
+                    plotArea
+                        .background(Color.clear)
+                }
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 4)) { value in
-                        AxisGridLine()
                         AxisTick()
                         AxisValueLabel {
                             if let date = value.as(Date.self) {
@@ -73,7 +76,10 @@ struct TypingSpeedChartView: View {
                     }
                 }
                 .chartYAxis {
-                    AxisMarks(position: .trailing)
+                    AxisMarks(position: .trailing) { _ in
+                        AxisTick()
+                        AxisValueLabel()
+                    }
                 }
                 .chartYAxisLabel(position: .trailing, alignment: .top) {
                     Text("WPM")
