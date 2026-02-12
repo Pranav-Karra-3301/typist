@@ -19,6 +19,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         configurePopover()
     }
 
+    var hasStatusItemButton: Bool {
+        statusItem.button != nil
+    }
+
     func applyStatusItemState(_ state: StatusItemState) {
         currentStatusState = state
 

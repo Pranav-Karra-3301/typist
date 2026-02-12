@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             appModel = model
             menuBarController = controller
+            scheduleMenuBarRecoveryIfNeeded()
 
             Task {
                 await model.start()
@@ -61,6 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         return .terminateLater
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showSettingsWindow()
+        return false
     }
 
     private func showSettingsWindow() {
@@ -91,6 +97,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController = windowController
         windowController.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func scheduleMenuBarRecoveryIfNeeded() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard let self else { return }
+            guard settingsWindowController?.window?.isVisible != true else { return }
+            guard menuBarController?.hasStatusItemButton == false else { return }
+
+            AppDiagnostics.shared.mark("Status item unavailable at launch; opening Settings window")
+            showSettingsWindow()
+        }
     }
 
     private static func databaseURL() throws -> URL {
