@@ -134,6 +134,42 @@ struct SettingsView: View {
                 }
 
                 settingsGroup(
+                    title: "Diagnostics",
+                    subtitle: "Runtime details and recent instrumentation output"
+                ) {
+                    Text(appModel.debugSummary)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if appModel.debugLines.isEmpty {
+                        Text("No diagnostics lines available yet.")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(appModel.debugLines, id: \.self) { line in
+                                Text(line)
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        Button("Copy Debug Logs") {
+                            appModel.copyDiagnosticsToClipboard()
+                        }
+                        .buttonStyle(.bordered)
+
+                        Spacer()
+                    }
+                }
+
+                settingsGroup(
                     title: "Actions",
                     subtitle: "Maintenance and permissions"
                 ) {

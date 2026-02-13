@@ -358,9 +358,7 @@ struct MenuPopoverView: View {
 
     private var menuActionRows: some View {
         VStack(spacing: 0) {
-            menuActionButton(title: "More") {
-                appModel.openSettings(tab: .statusIcon)
-            }
+            moreMenuButton
 
             Divider().overlay(Color.white.opacity(0.08))
 
@@ -401,16 +399,44 @@ struct MenuPopoverView: View {
         )
     }
 
+    private var moreMenuButton: some View {
+        Menu {
+            Button("Open Settings…") {
+                appModel.openSettings()
+            }
+
+            Button("Open Status Icon Settings…") {
+                appModel.openSettings(tab: .statusIcon)
+            }
+
+            Divider()
+
+            Button("Copy Debug Logs") {
+                appModel.copyDiagnosticsToClipboard()
+            }
+        } label: {
+            menuActionRowLabel(title: "More")
+        }
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+    }
+
+    private func menuActionRowLabel(title: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(.white.opacity(0.86))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
     private func menuActionButton(title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                Spacer()
-            }
-            .foregroundStyle(.white.opacity(0.86))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            menuActionRowLabel(title: title)
         }
         .buttonStyle(.plain)
     }
