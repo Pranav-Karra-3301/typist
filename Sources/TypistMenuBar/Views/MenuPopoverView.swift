@@ -32,10 +32,6 @@ struct MenuPopoverView: View {
                 sectionDivider
                 topKeysSection
 
-                if appModel.showDiagnosticsInPopover {
-                    sectionDivider
-                    diagnosticsSection
-                }
 
                 sectionDivider
                 metricsSection
@@ -289,29 +285,6 @@ struct MenuPopoverView: View {
         .frame(height: maxHeight)
     }
 
-    private var diagnosticsSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text("Diagnostics")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.86))
-
-                Spacer()
-
-                Button("Copy") {
-                    appModel.copyDiagnosticsToClipboard()
-                }
-                .buttonStyle(.borderless)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.72))
-            }
-
-            Text(appModel.debugSummary)
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.68))
-                .textSelection(.enabled)
-        }
-    }
 
     private var footerSection: some View {
         VStack(alignment: .leading, spacing: 8) {

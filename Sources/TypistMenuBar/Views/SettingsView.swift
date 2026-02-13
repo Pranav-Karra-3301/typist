@@ -171,11 +171,7 @@ struct SettingsView: View {
                     title: "Status Icon",
                     subtitle: "Choose what appears in the menu bar"
                 ) {
-                    Picker("Icon style", selection: $appModel.statusIconStyle) {
-                        ForEach(StatusIconStyle.allCases) { style in
-                            Text(style.title).tag(style)
-                        }
-                    }
+                    statusIconGrid
 
                     Toggle("Show monochrome icon", isOn: $appModel.statusIconMonochrome)
                     Toggle("Show text count", isOn: $appModel.showStatusTextCount)
@@ -189,6 +185,84 @@ struct SettingsView: View {
                 }
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    private var statusIconGrid: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Icon style")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.76))
+
+            LazyVGrid(columns: statusIconGridColumns, alignment: .leading, spacing: 10) {
+                ForEach(StatusIconStyle.allCases) { style in
+                    statusIconGridCell(for: style)
+                }
+            }
+        }
+    }
+
+    private let statusIconGridColumns = [
+        GridItem(.adaptive(minimum: 116), spacing: 10)
+    ]
+
+    @ViewBuilder
+    private func statusIconGridCell(for style: StatusIconStyle) -> some View {
+        let isSelected = style == appModel.statusIconStyle
+
+        Button {
+            appModel.statusIconStyle = style
+        } label: {
+            statusIconGridCellLabel(for: style, isSelected: isSelected)
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .topTrailing) {
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+                    .offset(x: 5, y: -5)
+            }
+        }
+    }
+
+    private func statusIconGridCellLabel(for style: StatusIconStyle, isSelected: Bool) -> some View {
+        VStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(isSelected ? Color.accentColor : Color.white.opacity(0.18), lineWidth: isSelected ? 2 : 1)
+                    )
+
+                statusIconPreview(for: style)
+            }
+            .frame(width: 72, height: 72)
+
+            Text(style.title)
+                .font(.system(size: 11, weight: isSelected ? .semibold : .medium, design: .rounded))
+                .foregroundStyle(isSelected ? .white : .white.opacity(0.76))
+                .lineLimit(1)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func statusIconPreview(for style: StatusIconStyle) -> some View {
+        let previewImage = StatusIconRenderer.monochromeIcon(for: style, size: 28, isTemplate: true)
+        return Group {
+            if let previewImage {
+                Image(nsImage: previewImage)
+                    .resizable()
+                    .renderingMode(.template)
+                    .frame(width: 28, height: 28)
+                    .foregroundStyle(appModel.statusIconMonochrome ? .white : Color.accentColor)
+                    .scaleEffect(1.05)
+            } else {
+                Text("?")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
