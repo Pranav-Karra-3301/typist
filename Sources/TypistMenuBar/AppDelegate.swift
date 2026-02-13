@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         do {
-            let databaseURL = try Self.databaseURL()
+            let databaseURL = try AppStorage.databaseURL()
             AppDiagnostics.shared.mark("Using SQLite database at \(databaseURL.path)")
             let store = try SQLiteStore(databaseURL: databaseURL)
             let metricsEngine = MetricsEngine(store: store, queryService: store)
@@ -112,17 +112,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private static func databaseURL() throws -> URL {
-        let appSupportDirectory = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-
-        let typistDirectory = appSupportDirectory.appendingPathComponent("Typist", isDirectory: true)
-        try FileManager.default.createDirectory(at: typistDirectory, withIntermediateDirectories: true)
-
-        return typistDirectory.appendingPathComponent("typist.sqlite3", isDirectory: false)
-    }
 }

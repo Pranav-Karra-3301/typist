@@ -78,7 +78,7 @@ final class AppModel: ObservableObject {
 
     @Published var selectedTimeframe: Timeframe = .h12 {
         didSet {
-            UserDefaults.standard.set(selectedTimeframe.rawValue, forKey: DefaultsKey.selectedTimeframe)
+            defaults.set(selectedTimeframe.rawValue, forKey: DefaultsKey.selectedTimeframe)
             selectedHeatmapKeyCode = nil
             let timeframe = selectedTimeframe
             Task { await refreshSelectedTimeframe(for: timeframe) }
@@ -104,47 +104,47 @@ final class AppModel: ObservableObject {
 
     @Published var statusIconStyle: StatusIconStyle {
         didSet {
-            UserDefaults.standard.set(statusIconStyle.rawValue, forKey: DefaultsKey.statusIconStyle)
+            defaults.set(statusIconStyle.rawValue, forKey: DefaultsKey.statusIconStyle)
             publishStatusItemState()
         }
     }
 
     @Published var showStatusTextCount: Bool {
         didSet {
-            UserDefaults.standard.set(showStatusTextCount, forKey: DefaultsKey.showStatusTextCount)
+            defaults.set(showStatusTextCount, forKey: DefaultsKey.showStatusTextCount)
             publishStatusItemState()
         }
     }
 
     @Published var statusTextMetric: StatusTextMetric {
         didSet {
-            UserDefaults.standard.set(statusTextMetric.rawValue, forKey: DefaultsKey.statusTextMetric)
+            defaults.set(statusTextMetric.rawValue, forKey: DefaultsKey.statusTextMetric)
             publishStatusItemState()
         }
     }
 
     @Published var statusIconMonochrome: Bool {
         didSet {
-            UserDefaults.standard.set(statusIconMonochrome, forKey: DefaultsKey.statusIconMonochrome)
+            defaults.set(statusIconMonochrome, forKey: DefaultsKey.statusIconMonochrome)
             publishStatusItemState()
         }
     }
 
     @Published var showHeatmapInPopover: Bool {
         didSet {
-            UserDefaults.standard.set(showHeatmapInPopover, forKey: DefaultsKey.showHeatmapInPopover)
+            defaults.set(showHeatmapInPopover, forKey: DefaultsKey.showHeatmapInPopover)
         }
     }
 
     @Published var showDiagnosticsInPopover: Bool {
         didSet {
-            UserDefaults.standard.set(showDiagnosticsInPopover, forKey: DefaultsKey.showDiagnosticsInPopover)
+            defaults.set(showDiagnosticsInPopover, forKey: DefaultsKey.showDiagnosticsInPopover)
         }
     }
 
     @Published var autoCheckUpdates: Bool {
         didSet {
-            UserDefaults.standard.set(autoCheckUpdates, forKey: DefaultsKey.autoCheckUpdates)
+            defaults.set(autoCheckUpdates, forKey: DefaultsKey.autoCheckUpdates)
         }
     }
 
@@ -152,6 +152,7 @@ final class AppModel: ObservableObject {
     var openSettingsHandler: (() -> Void)?
 
     private let metricsEngine: MetricsEngine
+    private let defaults: UserDefaults
     private let store: StatsResetting
     private let captureService: KeyboardCaptureProviding
     private let launchAtLoginManager: LaunchAtLoginManager
@@ -178,9 +179,10 @@ final class AppModel: ObservableObject {
         store: StatsResetting,
         captureService: KeyboardCaptureProviding,
         launchAtLoginManager: LaunchAtLoginManager,
-        updateService: any UpdateChecking
+        updateService: any UpdateChecking,
+        defaults: UserDefaults = AppStorage.defaults
     ) {
-        let defaults = UserDefaults.standard
+        self.defaults = defaults
         let initialTimeframe = Timeframe(
             rawValue: defaults.string(forKey: DefaultsKey.selectedTimeframe) ?? ""
         ) ?? .h12
@@ -195,16 +197,17 @@ final class AppModel: ObservableObject {
         self.launchAtLoginEnabled = launchAtLoginManager.isEnabled
 
         self.statusIconStyle = StatusIconStyle(rawValue: defaults.string(forKey: DefaultsKey.statusIconStyle) ?? "") ?? .dynamic
-        self.showStatusTextCount = Self.boolDefault(forKey: DefaultsKey.showStatusTextCount, defaultValue: true)
+        self.showStatusTextCount = Self.boolDefault(forKey: DefaultsKey.showStatusTextCount, defaults: defaults, defaultValue: true)
         self.statusTextMetric = StatusTextMetric(rawValue: defaults.string(forKey: DefaultsKey.statusTextMetric) ?? "") ?? .keystrokes
-        self.statusIconMonochrome = Self.boolDefault(forKey: DefaultsKey.statusIconMonochrome, defaultValue: true)
-        self.showHeatmapInPopover = Self.boolDefault(forKey: DefaultsKey.showHeatmapInPopover, defaultValue: true)
-        self.showDiagnosticsInPopover = Self.boolDefault(forKey: DefaultsKey.showDiagnosticsInPopover, defaultValue: true)
-        self.autoCheckUpdates = Self.boolDefault(forKey: DefaultsKey.autoCheckUpdates, defaultValue: true)
+        self.statusIconMonochrome = Self.boolDefault(forKey: DefaultsKey.statusIconMonochrome, defaults: defaults, defaultValue: true)
+        self.showHeatmapInPopover = Self.boolDefault(forKey: DefaultsKey.showHeatmapInPopover, defaults: defaults, defaultValue: true)
+        self.showDiagnosticsInPopover = Self.boolDefault(forKey: DefaultsKey.showDiagnosticsInPopover, defaults: defaults, defaultValue: true)
+        self.autoCheckUpdates = Self.boolDefault(forKey: DefaultsKey.autoCheckUpdates, defaults: defaults, defaultValue: true)
         self.showUnsignedInstallNotice = Self.shouldDisplayUnsignedInstallNotice(defaults: defaults)
         self.lastUpdateCheckDate = defaults.object(forKey: DefaultsKey.lastUpdateCheckAt) as? Date
         self.autoUpdateCheckIntervalHours = Self.doubleDefault(
             forKey: DefaultsKey.updateCheckIntervalHours,
+            defaults: defaults,
             defaultValue: 24
         )
 
@@ -356,7 +359,7 @@ final class AppModel: ObservableObject {
 
     func dismissUnsignedInstallNotice() {
         guard showUnsignedInstallNotice else { return }
-        UserDefaults.standard.set(true, forKey: DefaultsKey.didDismissUnsignedInstallNotice)
+        defaults.set(true, forKey: DefaultsKey.didDismissUnsignedInstallNotice)
         showUnsignedInstallNotice = false
     }
 
@@ -495,8 +498,8 @@ final class AppModel: ObservableObject {
     }
 
     private func requestPermissionIfFirstLaunch() async {
-        guard !UserDefaults.standard.bool(forKey: DefaultsKey.didAttemptPermissionPrompt) else { return }
-        UserDefaults.standard.set(true, forKey: DefaultsKey.didAttemptPermissionPrompt)
+        guard !defaults.bool(forKey: DefaultsKey.didAttemptPermissionPrompt) else { return }
+        defaults.set(true, forKey: DefaultsKey.didAttemptPermissionPrompt)
 
         _ = PermissionsService.requestInputMonitoringPermission()
         await refreshPermissionAndCaptureState()
@@ -598,16 +601,16 @@ final class AppModel: ObservableObject {
 
     private func recordUpdateCheckDate(_ date: Date) {
         lastUpdateCheckDate = date
-        UserDefaults.standard.set(date, forKey: DefaultsKey.lastUpdateCheckAt)
+        defaults.set(date, forKey: DefaultsKey.lastUpdateCheckAt)
     }
 
     private func shouldPromptForUpdate(tag: String) -> Bool {
-        let lastPromptedTag = UserDefaults.standard.string(forKey: DefaultsKey.lastPromptedUpdateTag)
+        let lastPromptedTag = defaults.string(forKey: DefaultsKey.lastPromptedUpdateTag)
         return lastPromptedTag != tag
     }
 
     private func markPromptedUpdateTag(_ tag: String) {
-        UserDefaults.standard.set(tag, forKey: DefaultsKey.lastPromptedUpdateTag)
+        defaults.set(tag, forKey: DefaultsKey.lastPromptedUpdateTag)
     }
 
     private func showUpToDateAlert(current: AppVersion) {
@@ -646,15 +649,23 @@ final class AppModel: ObservableObject {
         alert.runModal()
     }
 
-    private static func boolDefault(forKey key: String, defaultValue: Bool) -> Bool {
-        if let value = UserDefaults.standard.object(forKey: key) as? Bool {
+    private static func boolDefault(
+        forKey key: String,
+        defaults: UserDefaults,
+        defaultValue: Bool
+    ) -> Bool {
+        if let value = defaults.object(forKey: key) as? Bool {
             return value
         }
         return defaultValue
     }
 
-    private static func doubleDefault(forKey key: String, defaultValue: Double) -> Double {
-        if let value = UserDefaults.standard.object(forKey: key) as? Double {
+    private static func doubleDefault(
+        forKey key: String,
+        defaults: UserDefaults,
+        defaultValue: Double
+    ) -> Double {
+        if let value = defaults.object(forKey: key) as? Double {
             return value
         }
         return defaultValue
