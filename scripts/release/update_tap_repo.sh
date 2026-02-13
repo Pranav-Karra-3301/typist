@@ -12,6 +12,17 @@ if [[ -z "$source_repo" ]]; then
   echo "SOURCE_REPO is required (owner/repo)."
   exit 1
 fi
+asset_url="https://github.com/$source_repo/releases/download/v${version}/Typist-${version}.dmg"
+
+if [[ ! "$sha256" =~ ^[A-Fa-f0-9]{64}$ ]]; then
+  echo "Invalid SHA256 checksum format: $sha256"
+  exit 1
+fi
+
+if ! curl -fsIL "$asset_url" >/dev/null; then
+  echo "Release asset URL is not reachable: $asset_url"
+  exit 1
+fi
 
 tap_branch="${TAP_DEFAULT_BRANCH:-main}"
 tap_clone_url="https://x-access-token:${TAP_REPO_TOKEN}@github.com/${TAP_REPO}.git"
@@ -26,7 +37,7 @@ cask "typist" do
   version "$version"
   sha256 "$sha256"
 
-  url "https://github.com/$source_repo/releases/download/v#{version}/Typist-#{version}.dmg"
+  url "$asset_url"
   name "Typist"
   desc "Privacy-first macOS typing metrics menu bar app"
   homepage "https://github.com/$source_repo"
