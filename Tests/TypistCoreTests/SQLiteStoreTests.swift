@@ -50,6 +50,59 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(sevenDays.totalKeystrokes, 4)
     }
 
+    func testWordCountSkipsEventsMarkedAsIgnoredForWordStats() async throws {
+        let dbURL = makeDatabaseURL(testName: #function)
+        let store = try SQLiteStore(databaseURL: dbURL, retentionDays: 10_000)
+
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let events = [
+            KeyEvent(
+                timestamp: base,
+                keyCode: 4,
+                isSeparator: false,
+                deviceClass: .builtIn,
+                appBundleID: "com.apple.TextEdit",
+                appName: "TextEdit"
+            ),
+            KeyEvent(
+                timestamp: base.addingTimeInterval(1),
+                keyCode: 44,
+                isSeparator: true,
+                deviceClass: .builtIn,
+                appBundleID: "com.apple.TextEdit",
+                appName: "TextEdit"
+            ),
+            KeyEvent(
+                timestamp: base.addingTimeInterval(2),
+                keyCode: 4,
+                isSeparator: false,
+                deviceClass: .builtIn,
+                appBundleID: "com.superwhisper.app",
+                appName: "Super Whisper",
+                isCountedForWordStats: false
+            ),
+            KeyEvent(
+                timestamp: base.addingTimeInterval(3),
+                keyCode: 44,
+                isSeparator: true,
+                deviceClass: .builtIn,
+                appBundleID: "com.superwhisper.app",
+                appName: "Super Whisper",
+                isCountedForWordStats: false
+            )
+        ]
+
+        let wordIncrements = [
+            WordIncrement(timestamp: base.addingTimeInterval(1), deviceClass: .builtIn)
+        ]
+
+        try await store.flush(events: events, wordIncrements: wordIncrements, activeTypingIncrements: [])
+        let snapshot = try await store.snapshot(for: .h24, now: base.addingTimeInterval(10))
+
+        XCTAssertEqual(snapshot.totalKeystrokes, 4)
+        XCTAssertEqual(snapshot.totalWords, 1)
+    }
+
     func testWordCountingInSnapshotUsesEventSequence() async throws {
         let dbURL = makeDatabaseURL(testName: #function)
         let store = try SQLiteStore(databaseURL: dbURL, retentionDays: 10_000)

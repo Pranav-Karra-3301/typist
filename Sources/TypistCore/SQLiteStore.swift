@@ -102,8 +102,7 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
     public func flush(
         events: [KeyEvent],
         wordIncrements: [WordIncrement],
-        activeTypingIncrements: [ActiveTypingIncrement],
-        sessionData: [SessionFlushData] = []
+        activeTypingIncrements: [ActiveTypingIncrement]
     ) async throws {
         try queue.sync {
             try flushSync(events: events, wordIncrements: wordIncrements, activeTypingIncrements: activeTypingIncrements)
@@ -144,7 +143,10 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
 
         do {
             let insertEvent = try prepare(
-                "INSERT INTO event_ring_buffer(ts, key_code, device_class) VALUES(?, ?, ?);"
+                """
+                INSERT INTO event_ring_buffer(ts, key_code, device_class, is_counted_for_word_stats)
+                VALUES(?, ?, ?, ?);
+                """
             )
             defer { sqlite3_finalize(insertEvent) }
 
@@ -235,7 +237,12 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
 
                 try run(
                     insertEvent,
-                    bindings: [.int64(ts), .int64(Int64(event.keyCode)), .text(event.deviceClass.rawValue)]
+                    bindings: [
+                        .int64(ts),
+                        .int64(Int64(event.keyCode)),
+                        .text(event.deviceClass.rawValue),
+                        .text(event.isCountedForWordStats ? "1" : "0")
+                    ]
                 )
 
                 try run(
@@ -781,6 +788,7 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 SELECT key_code
                 FROM event_ring_buffer
                 WHERE ts < ? AND key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
+                  AND is_counted_for_word_stats = 1
                 ORDER BY ts DESC, rowid DESC
                 LIMIT 1;
                 """,
@@ -799,6 +807,7 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 SELECT key_code
                 FROM event_ring_buffer
                 WHERE ts >= ? AND key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
+                  AND is_counted_for_word_stats = 1
                 ORDER BY ts ASC, rowid ASC;
                 """,
                 bindings: [.int64(startTimestamp)]
@@ -809,6 +818,7 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 SELECT key_code
                 FROM event_ring_buffer
                 WHERE key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
+                  AND is_counted_for_word_stats = 1
                 ORDER BY ts ASC, rowid ASC;
                 """,
                 bindings: []
@@ -1113,7 +1123,8 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
             CREATE TABLE IF NOT EXISTS event_ring_buffer (
                 ts INTEGER NOT NULL,
                 key_code INTEGER NOT NULL,
-                device_class TEXT NOT NULL
+                device_class TEXT NOT NULL,
+                is_counted_for_word_stats INTEGER NOT NULL DEFAULT 1
             );
             """
         )
@@ -1122,6 +1133,11 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
 
         // Migrate existing databases: add new columns if missing
         try migrateTypingStatsColumns()
+        try migrateEventRingColumns()
+    }
+
+    private func migrateEventRingColumns() throws {
+        try? execute("ALTER TABLE event_ring_buffer ADD COLUMN is_counted_for_word_stats INTEGER NOT NULL DEFAULT 1;")
     }
 
     private func migrateTypingStatsColumns() throws {

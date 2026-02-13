@@ -8,7 +8,6 @@ public actor MetricsEngine {
     // Per-app session tracking
     private var sessions: [String: TypingSession] = [:] // keyed by appBundleID
     private var wordCounters: [String: WordCounterStateMachine] = [:] // keyed by appBundleID
-    private var globalWordCounter = WordCounterStateMachine()
 
     // Pending data for flush
     private var pendingEvents: [KeyEvent] = []
@@ -16,20 +15,11 @@ public actor MetricsEngine {
     private var pendingActiveTypingByBucket: [Date: Double] = [:]
     private var pendingActiveFlowByBucket: [Date: Double] = [:]
     private var pendingActiveSkillByBucket: [Date: Double] = [:]
-    private var pendingSessionData: [SessionFlushData] = []
     // Per-bucket session metrics
     private var pendingTypedWordsByBucket: [Date: Int] = [:]
     private var pendingPastedWordsByBucket: [Date: Int] = [:]
     private var pendingPasteEventsByBucket: [Date: Int] = [:]
     private var pendingEditEventsByBucket: [Date: Int] = [:]
-    // Running totals for pending (unflushed) data only — reset on flush
-    private var pendingTypedWords: Int = 0
-    private var pendingPastedWordsEst: Int = 0
-    private var pendingPasteEvents: Int = 0
-    private var pendingEditEvents: Int = 0
-    private var pendingActiveSecondsFlow: Double = 0
-    private var pendingActiveSecondsSkill: Double = 0
-
     // Last text-producing event time per app (monotonic)
     private var lastTextEventMonotonic: [String: TimeInterval] = [:]
     private var lastTextEventWallClock: [String: Date] = [:]
@@ -48,6 +38,20 @@ public actor MetricsEngine {
     private var lastIngestAt: Date?
     private var lastFlushAt: Date?
     private var lastFlushError: String?
+    private let ignoredWordCountBundleSuffixes: Set<String> = [
+        "wispr",
+        "superwhisper",
+        "dictation"
+    ]
+    private let ignoredWordCountAppNameFragments: Set<String> = [
+        "wispr",
+        "super whisper",
+        "superwispr",
+        "wispr flow",
+        "dictation",
+        "voice dictation",
+        "speech"
+    ]
 
     public init(
         store: PersistenceWriting,
@@ -100,20 +104,12 @@ public actor MetricsEngine {
         pendingActiveTypingByBucket.removeAll(keepingCapacity: false)
         pendingActiveFlowByBucket.removeAll(keepingCapacity: false)
         pendingActiveSkillByBucket.removeAll(keepingCapacity: false)
-        pendingSessionData.removeAll(keepingCapacity: false)
         pendingTypedWordsByBucket.removeAll(keepingCapacity: false)
         pendingPastedWordsByBucket.removeAll(keepingCapacity: false)
         pendingPasteEventsByBucket.removeAll(keepingCapacity: false)
         pendingEditEventsByBucket.removeAll(keepingCapacity: false)
-        pendingTypedWords = 0
-        pendingPastedWordsEst = 0
-        pendingPasteEvents = 0
-        pendingEditEvents = 0
-        pendingActiveSecondsFlow = 0
-        pendingActiveSecondsSkill = 0
         sessions.removeAll()
         wordCounters.removeAll()
-        globalWordCounter.reset()
         lastTextEventMonotonic.removeAll()
         lastTextEventWallClock.removeAll()
         lastKeystrokeTime = nil
@@ -134,17 +130,29 @@ public actor MetricsEngine {
     }
 
     public func ingest(_ event: KeyEvent) async {
-        pendingEvents.append(event)
+        let appID = event.appBundleID ?? AppIdentity.unknownBundleID
+        let shouldCountForWordStats = shouldCountEventInWordStats(event)
+        let eventForStorage = event.withWordCounting(shouldCountForWordStats)
+        pendingEvents.append(eventForStorage)
         totalIngestedEvents += 1
         lastIngestAt = event.timestamp
 
-        let appID = event.appBundleID ?? AppIdentity.unknownBundleID
         let appName = event.appName ?? AppIdentity.unknownAppName
-
-        // --- Session management ---
-        let isTextProducing = event.isTextProducing
         let isDelete = KeyboardKeyMapper.isDeleteKey(event.keyCode)
         let isPaste = event.isPasteChord
+
+        if !shouldCountForWordStats {
+            clearWordCountState(for: appID, event: event)
+
+            if pendingEvents.count >= flushThreshold {
+                do {
+                    try await flushIfNeeded(force: true)
+                } catch {
+                    lastFlushError = error.localizedDescription
+                }
+            }
+            return
+        }
 
         // Check for session timeout or app switch
         if let existingSession = sessions[appID] {
@@ -161,27 +169,22 @@ public actor MetricsEngine {
         }
 
         // --- Process text-producing events for timing ---
-        if isTextProducing {
+        if event.isTextProducing {
             processTextEvent(appID: appID, event: event, isDelete: isDelete, isPaste: isPaste)
         }
 
-        // --- Word counting (global + per-app) ---
-        let wordCommitted = globalWordCounter.process(event: event)
-
-        // Per-app word counter
+        // --- Word counting (per-app) ---
         if wordCounters[appID] == nil {
             wordCounters[appID] = WordCounterStateMachine()
         }
-        _ = wordCounters[appID]!.process(event: event)
+        let wordCommitted = wordCounters[appID]!.process(event: event)
 
         if wordCommitted {
             let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
             if isPaste {
-                pendingPastedWordsEst += 1
                 pendingPastedWordsByBucket[fiveMinuteBucket, default: 0] += 1
                 sessions[appID]?.pastedWordsEst += 1
             } else {
-                pendingTypedWords += 1
                 pendingTypedWordsByBucket[fiveMinuteBucket, default: 0] += 1
                 sessions[appID]?.typedWords += 1
             }
@@ -209,13 +212,11 @@ public actor MetricsEngine {
         // Track paste and edit events (total + per-bucket)
         if isPaste {
             let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
-            pendingPasteEvents += 1
             pendingPasteEventsByBucket[fiveMinuteBucket, default: 0] += 1
             sessions[appID]?.pasteEvents += 1
         }
         if isDelete {
             let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
-            pendingEditEvents += 1
             pendingEditEventsByBucket[fiveMinuteBucket, default: 0] += 1
             sessions[appID]?.editEvents += 1
         }
@@ -229,16 +230,6 @@ public actor MetricsEngine {
         }
     }
 
-    /// Notify engine that app focus changed. Ends sessions for apps that are no longer frontmost.
-    public func notifyAppFocusChange(newAppBundleID: String?) {
-        // End sessions for all apps except the new frontmost
-        for (appID, _) in sessions {
-            if appID != (newAppBundleID ?? AppIdentity.unknownBundleID) {
-                endSession(forApp: appID)
-            }
-        }
-    }
-
     public func snapshot(for timeframe: Timeframe, now: Date = Date()) async throws -> StatsSnapshot {
         var snapshot = try await queryService.snapshot(for: timeframe, now: now)
 
@@ -247,6 +238,7 @@ public actor MetricsEngine {
         }
 
         let startDate = timeframe.startDate(now: now)
+        let bucketStartDate = startDate.map { TimeBucket.start(of: $0, granularity: .fiveMinutes) }
         let filteredEvents = pendingEvents.filter { event in
             guard let startDate else { return true }
             return event.timestamp >= startDate
@@ -265,12 +257,12 @@ public actor MetricsEngine {
         snapshot.totalWords += filteredWords.count
 
         // Merge session-based metrics
-        snapshot.typedWords += pendingTypedWords
-        snapshot.pastedWordsEst += pendingPastedWordsEst
-        snapshot.pasteEvents += pendingPasteEvents
-        snapshot.editEvents += pendingEditEvents
-        snapshot.activeSecondsFlow += pendingActiveSecondsFlow
-        snapshot.activeSecondsSkill += pendingActiveSecondsSkill
+        snapshot.typedWords += bucketedIntSum(pendingTypedWordsByBucket, from: bucketStartDate)
+        snapshot.pastedWordsEst += bucketedIntSum(pendingPastedWordsByBucket, from: bucketStartDate)
+        snapshot.pasteEvents += bucketedIntSum(pendingPasteEventsByBucket, from: bucketStartDate)
+        snapshot.editEvents += bucketedIntSum(pendingEditEventsByBucket, from: bucketStartDate)
+        snapshot.activeSecondsFlow += bucketedDoubleSum(pendingActiveFlowByBucket, from: bucketStartDate)
+        snapshot.activeSecondsSkill += bucketedDoubleSum(pendingActiveSkillByBucket, from: bucketStartDate)
 
         var builtIn = snapshot.deviceBreakdown.builtIn
         var external = snapshot.deviceBreakdown.external
@@ -355,7 +347,8 @@ public actor MetricsEngine {
         if var counter = wordCounters[appID] {
             if counter.flushLastWord() {
                 if let session = sessions[appID] {
-                    pendingTypedWords += 1
+                    let bucket = TimeBucket.start(of: session.lastTextEventTime, granularity: .fiveMinutes)
+                    pendingTypedWordsByBucket[bucket, default: 0] += 1
                     var updatedSession = session
                     updatedSession.typedWords += 1
                     sessions[appID] = updatedSession
@@ -371,11 +364,6 @@ public actor MetricsEngine {
                 }
             }
             wordCounters[appID] = counter
-        }
-
-        // Also flush global word counter's last word
-        if globalWordCounter.flushLastWord() {
-            // Already counted above in per-app; only need to handle if not counted
         }
 
         sessions.removeValue(forKey: appID)
@@ -417,9 +405,6 @@ public actor MetricsEngine {
         let flowDelta = min(dt, config.idleCapFlow)
         // Skill active time: min(dt, idle_cap_skill)
         let skillDelta = min(dt, config.idleCapSkill)
-
-        pendingActiveSecondsFlow += flowDelta
-        pendingActiveSecondsSkill += skillDelta
 
         sessions[appID]?.activeSecondsFlow += flowDelta
         sessions[appID]?.activeSecondsSkill += skillDelta
@@ -606,7 +591,9 @@ public actor MetricsEngine {
     private func flushIfNeeded(force: Bool) async throws {
         guard force || pendingEvents.count >= flushThreshold else { return }
         guard !pendingEvents.isEmpty || !pendingWordIncrements.isEmpty ||
-              !pendingActiveTypingByBucket.isEmpty || !pendingSessionData.isEmpty else { return }
+            !pendingActiveTypingByBucket.isEmpty || !pendingActiveFlowByBucket.isEmpty || !pendingActiveSkillByBucket.isEmpty else {
+            return
+        }
 
         let events = pendingEvents
         let wordIncrements = pendingWordIncrements
@@ -632,13 +619,10 @@ public actor MetricsEngine {
                 editEvents: pendingEditEventsByBucket[bucket] ?? 0
             )
         }
-        let sessionData = pendingSessionData
-
         try await store.flush(
             events: events,
             wordIncrements: wordIncrements,
-            activeTypingIncrements: activeTypingIncrements,
-            sessionData: sessionData
+            activeTypingIncrements: activeTypingIncrements
         )
         totalFlushes += 1
         totalFlushedEvents += events.count
@@ -649,17 +633,69 @@ public actor MetricsEngine {
         pendingActiveTypingByBucket.removeAll(keepingCapacity: true)
         pendingActiveFlowByBucket.removeAll(keepingCapacity: true)
         pendingActiveSkillByBucket.removeAll(keepingCapacity: true)
-        pendingSessionData.removeAll(keepingCapacity: true)
         pendingTypedWordsByBucket.removeAll(keepingCapacity: true)
         pendingPastedWordsByBucket.removeAll(keepingCapacity: true)
         pendingPasteEventsByBucket.removeAll(keepingCapacity: true)
         pendingEditEventsByBucket.removeAll(keepingCapacity: true)
-        // Reset aggregate counters — data is now persisted to DB
-        pendingTypedWords = 0
-        pendingPastedWordsEst = 0
-        pendingPasteEvents = 0
-        pendingEditEvents = 0
-        pendingActiveSecondsFlow = 0
-        pendingActiveSecondsSkill = 0
+    }
+
+    private func shouldCountEventInWordStats(_ event: KeyEvent) -> Bool {
+        guard event.isTextProducing else {
+            return true
+        }
+        return !shouldSuppressWordCounting(
+            bundleID: event.appBundleID,
+            appName: event.appName
+        )
+    }
+
+    private func shouldSuppressWordCounting(bundleID: String?, appName: String?) -> Bool {
+        let normalizedBundleID = (bundleID ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedAppName = (appName ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        if ignoredWordCountBundleSuffixes.contains(where: { ignored in
+            normalizedBundleID.contains(ignored)
+        }) {
+            return true
+        }
+
+        return ignoredWordCountAppNameFragments.contains(where: { ignored in
+            normalizedAppName.contains(ignored)
+        })
+    }
+
+    private func clearWordCountState(for appID: String, event: KeyEvent) {
+        wordCounters[appID]?.reset()
+        lastTextEventMonotonic.removeValue(forKey: appID)
+        lastTextEventWallClock.removeValue(forKey: appID)
+        if var session = sessions[appID] {
+            session.lastMonotonicTime = event.monotonicTime
+            session.lastTextEventTime = event.timestamp
+            sessions[appID] = session
+        }
+    }
+
+    private func bucketedIntSum(_ valuesByBucket: [Date: Int], from startDate: Date?) -> Int {
+        guard let startDate else { return valuesByBucket.values.reduce(0, +) }
+
+        return valuesByBucket.reduce(into: 0) { total, entry in
+            if entry.key >= startDate {
+                total += entry.value
+            }
+        }
+    }
+
+    private func bucketedDoubleSum(_ valuesByBucket: [Date: Double], from startDate: Date?) -> Double {
+        guard let startDate else { return valuesByBucket.values.reduce(0, +) }
+
+        return valuesByBucket.reduce(into: 0.0) { total, entry in
+            if entry.key >= startDate {
+                total += entry.value
+            }
+        }
     }
 }

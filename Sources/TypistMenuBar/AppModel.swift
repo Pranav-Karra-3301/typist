@@ -552,12 +552,18 @@ final class AppModel: ObservableObject {
     private func diagnosticsReport() async -> String {
         let appSnapshot = diagnostics.snapshot()
         let engineDiagnostics = await metricsEngine.diagnostics()
+        let databasePath = (try? AppStorage.databaseURL().path) ?? "unavailable"
+        let processName = ProcessInfo.processInfo.processName
+        let bundleID = Bundle.main.bundleIdentifier ?? "unknown"
 
         let lines = [
             "=== Typist Diagnostics ===",
             "permissionGranted=\(permissionGranted)",
             "captureRunning=\(captureRunning)",
             "selectedTimeframe=\(selectedTimeframe.rawValue)",
+            "bundleID=\(bundleID)",
+            "processName=\(processName)",
+            "databasePath=\(databasePath)",
             "snapshot.totalKeystrokes=\(snapshot.totalKeystrokes)",
             "snapshot.totalWords=\(snapshot.totalWords)",
             "--- counters ---",

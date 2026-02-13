@@ -207,8 +207,7 @@ final class SessionWPMTests: XCTestCase {
         await engine.stop()
 
         // After stop, the store should have received the flushed last word.
-        // The engine flushes both per-app and global word counters on session end,
-        // but only the per-app flush appends a WordIncrement.
+        // The engine flushes the per-app word counter on session end.
         let flushedWords = await store.flushedWordIncrementCount
         XCTAssertGreaterThanOrEqual(flushedWords, 1, "At least 1 word should be flushed on engine stop")
     }
@@ -276,8 +275,7 @@ private actor MockStoreForSession: TypistStore {
     func flush(
         events: [KeyEvent],
         wordIncrements: [WordIncrement],
-        activeTypingIncrements: [ActiveTypingIncrement],
-        sessionData: [SessionFlushData]
+        activeTypingIncrements: [ActiveTypingIncrement]
     ) async throws {
         flushedEventCount += events.count
         flushedWordIncrementCount += wordIncrements.count

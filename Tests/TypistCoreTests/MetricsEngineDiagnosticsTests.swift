@@ -21,8 +21,7 @@ private actor MockStoreForDiagnostics: TypistStore {
     func flush(
         events: [KeyEvent],
         wordIncrements: [WordIncrement],
-        activeTypingIncrements: [ActiveTypingIncrement],
-        sessionData: [SessionFlushData]
+        activeTypingIncrements: [ActiveTypingIncrement]
     ) async throws {}
 
     func snapshot(for timeframe: Timeframe, now: Date) async throws -> StatsSnapshot {

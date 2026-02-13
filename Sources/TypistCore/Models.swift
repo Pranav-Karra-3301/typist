@@ -142,6 +142,8 @@ public struct KeyEvent: Sendable, Hashable {
     public let keyCode: Int
     public let isSeparator: Bool
     public let isTextProducing: Bool
+    /// Whether this event should contribute to word-count and WPM calculations.
+    public let isCountedForWordStats: Bool
     public let deviceClass: DeviceClass
     public let appBundleID: String?
     public let appName: String?
@@ -157,6 +159,7 @@ public struct KeyEvent: Sendable, Hashable {
         appName: String? = nil,
         monotonicTime: TimeInterval = ProcessInfo.processInfo.systemUptime,
         isTextProducing: Bool? = nil,
+        isCountedForWordStats: Bool = true,
         isPasteChord: Bool = false
     ) {
         self.timestamp = timestamp
@@ -164,10 +167,26 @@ public struct KeyEvent: Sendable, Hashable {
         self.keyCode = keyCode
         self.isSeparator = isSeparator
         self.isTextProducing = isTextProducing ?? KeyboardKeyMapper.isTextProducingKey(keyCode)
+        self.isCountedForWordStats = isCountedForWordStats
         self.deviceClass = deviceClass
         self.appBundleID = appBundleID
         self.appName = appName
         self.isPasteChord = isPasteChord
+    }
+
+    public func withWordCounting(_ isCountedForWordStats: Bool) -> KeyEvent {
+        KeyEvent(
+            timestamp: timestamp,
+            keyCode: keyCode,
+            isSeparator: isSeparator,
+            deviceClass: deviceClass,
+            appBundleID: appBundleID,
+            appName: appName,
+            monotonicTime: monotonicTime,
+            isTextProducing: isTextProducing,
+            isCountedForWordStats: isCountedForWordStats,
+            isPasteChord: isPasteChord
+        )
     }
 }
 
@@ -510,46 +529,11 @@ public protocol KeyboardCaptureProviding {
 }
 
 /// Aggregated session metrics for flushing to persistence.
-public struct SessionFlushData: Sendable {
-    public let bucketStart: Date
-    public let typedWords: Int
-    public let pastedWordsEst: Int
-    public let pasteEvents: Int
-    public let editEvents: Int
-    public let activeSecondsFlow: Double
-    public let activeSecondsSkill: Double
-    public let appBundleID: String
-    public let appName: String
-
-    public init(
-        bucketStart: Date,
-        typedWords: Int,
-        pastedWordsEst: Int,
-        pasteEvents: Int,
-        editEvents: Int,
-        activeSecondsFlow: Double,
-        activeSecondsSkill: Double,
-        appBundleID: String,
-        appName: String
-    ) {
-        self.bucketStart = bucketStart
-        self.typedWords = typedWords
-        self.pastedWordsEst = pastedWordsEst
-        self.pasteEvents = pasteEvents
-        self.editEvents = editEvents
-        self.activeSecondsFlow = activeSecondsFlow
-        self.activeSecondsSkill = activeSecondsSkill
-        self.appBundleID = appBundleID
-        self.appName = appName
-    }
-}
-
 public protocol PersistenceWriting: Sendable {
     func flush(
         events: [KeyEvent],
         wordIncrements: [WordIncrement],
-        activeTypingIncrements: [ActiveTypingIncrement],
-        sessionData: [SessionFlushData]
+        activeTypingIncrements: [ActiveTypingIncrement]
     ) async throws
 }
 
