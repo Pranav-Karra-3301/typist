@@ -57,7 +57,6 @@ final class AppDiagnostics {
         lock.unlock()
 
         logger.info("\(message, privacy: .public)")
-        print("[Typist] \(message)")
     }
 
     func recordPermissionCheck(granted: Bool) {

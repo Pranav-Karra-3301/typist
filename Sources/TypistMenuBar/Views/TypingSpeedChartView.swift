@@ -7,7 +7,7 @@ struct TypingSpeedChartView: View {
     let points: [TypingSpeedTrendPoint]
 
     private var hasData: Bool {
-        points.contains { $0.flowWPM > 0 }
+        points.contains { $0.flowWPM > 0 || $0.words > 0 || $0.activeSeconds > 0 }
     }
 
     private var averageFlowWPM: Double {

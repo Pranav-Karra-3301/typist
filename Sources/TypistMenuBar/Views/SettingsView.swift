@@ -51,7 +51,6 @@ struct SettingsView: View {
                     )
 
                     Toggle("Show keyboard heatmap in menu popover", isOn: $appModel.showHeatmapInPopover)
-                    Toggle("Show diagnostics in menu popover", isOn: $appModel.showDiagnosticsInPopover)
 
                     if let launchError = appModel.launchErrorMessage {
                         Text("Launch setting error: \(launchError)")

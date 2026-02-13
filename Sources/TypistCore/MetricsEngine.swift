@@ -43,18 +43,35 @@ public actor MetricsEngine {
         "superwispr",
         "superwhisper",
         "wisprflow",
-        "dictation"
+        "dictation",
+        "kotoeri",
+        "speech",
+        "speechrecognition",
+        "com.apple.speech",
+        "voiceinput",
+        "dictation",
+        "dictate",
+        "dictationim",
+        "whisperspeech",
+        "com.apple.dictation"
     ]
     private let ignoredWordCountAppNameFragments: Set<String> = [
         "wispr",
         "super whisper",
         "superwispr",
         "wispr flow",
+        "wisprflow",
         "dictation",
         "voice dictation",
         "speech to text",
         "voice input",
-        "whisper flow"
+        "speech recognition",
+        "kotoeri",
+        "voice typing",
+        "dictate",
+        "whisper flow",
+        "dictationim",
+        "super whisper dictation"
     ]
 
     public init(
@@ -174,7 +191,7 @@ public actor MetricsEngine {
 
         // --- Process text-producing events for timing ---
         if event.isTextProducing {
-            processTextEvent(appID: appID, event: event, isDelete: isDelete, isPaste: isPaste)
+            processTextEvent(appID: appID, event: event)
         }
 
         // --- Word counting (per-app) ---
@@ -187,10 +204,8 @@ public actor MetricsEngine {
             let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
             if isPaste {
                 pendingPastedWordsByBucket[fiveMinuteBucket, default: 0] += 1
-                sessions[appID]?.pastedWordsEst += 1
             } else {
                 pendingTypedWordsByBucket[fiveMinuteBucket, default: 0] += 1
-                sessions[appID]?.typedWords += 1
             }
 
             pendingWordIncrements.append(
@@ -217,12 +232,10 @@ public actor MetricsEngine {
         if isPaste {
             let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
             pendingPasteEventsByBucket[fiveMinuteBucket, default: 0] += 1
-            sessions[appID]?.pasteEvents += 1
         }
         if isDelete {
             let fiveMinuteBucket = TimeBucket.start(of: event.timestamp, granularity: .fiveMinutes)
             pendingEditEventsByBucket[fiveMinuteBucket, default: 0] += 1
-            sessions[appID]?.editEvents += 1
         }
 
         if pendingEvents.count >= flushThreshold {
@@ -243,30 +256,37 @@ public actor MetricsEngine {
 
         let startDate = timeframe.startDate(now: now)
         let bucketStartDate = startDate.map { TimeBucket.start(of: $0, granularity: .fiveMinutes) }
-        let filteredEvents = pendingEvents.filter { event in
-            guard let startDate else { return true }
-            return event.timestamp >= startDate
+        let endBucketDate = TimeBucket.start(of: now, granularity: .fiveMinutes)
+
+        let isWithinWindow: (Date) -> Bool = { eventDate in
+            guard let startDate else {
+                return eventDate <= now
+            }
+            return eventDate >= startDate && eventDate <= now
         }
 
-        if filteredEvents.isEmpty && pendingWordIncrements.isEmpty {
+        let filteredEvents = pendingEvents.filter { event in
+            isWithinWindow(event.timestamp)
+        }
+
+        if filteredEvents.isEmpty && pendingWordIncrements.filter({ isWithinWindow($0.timestamp) }).isEmpty {
             return snapshot
         }
 
         snapshot.totalKeystrokes += filteredEvents.count
 
         let filteredWords = pendingWordIncrements.filter { increment in
-            guard let startDate else { return true }
-            return increment.timestamp >= startDate
+            isWithinWindow(increment.timestamp)
         }
         snapshot.totalWords += filteredWords.count
 
         // Merge session-based metrics
-        snapshot.typedWords += bucketedIntSum(pendingTypedWordsByBucket, from: bucketStartDate)
-        snapshot.pastedWordsEst += bucketedIntSum(pendingPastedWordsByBucket, from: bucketStartDate)
-        snapshot.pasteEvents += bucketedIntSum(pendingPasteEventsByBucket, from: bucketStartDate)
-        snapshot.editEvents += bucketedIntSum(pendingEditEventsByBucket, from: bucketStartDate)
-        snapshot.activeSecondsFlow += bucketedDoubleSum(pendingActiveFlowByBucket, from: bucketStartDate)
-        snapshot.activeSecondsSkill += bucketedDoubleSum(pendingActiveSkillByBucket, from: bucketStartDate)
+        snapshot.typedWords += bucketedIntSum(pendingTypedWordsByBucket, from: bucketStartDate, to: endBucketDate)
+        snapshot.pastedWordsEst += bucketedIntSum(pendingPastedWordsByBucket, from: bucketStartDate, to: endBucketDate)
+        snapshot.pasteEvents += bucketedIntSum(pendingPasteEventsByBucket, from: bucketStartDate, to: endBucketDate)
+        snapshot.editEvents += bucketedIntSum(pendingEditEventsByBucket, from: bucketStartDate, to: endBucketDate)
+        snapshot.activeSecondsFlow += bucketedDoubleSum(pendingActiveFlowByBucket, from: bucketStartDate, to: endBucketDate)
+        snapshot.activeSecondsSkill += bucketedDoubleSum(pendingActiveSkillByBucket, from: bucketStartDate, to: endBucketDate)
 
         var builtIn = snapshot.deviceBreakdown.builtIn
         var external = snapshot.deviceBreakdown.external
@@ -299,6 +319,9 @@ public actor MetricsEngine {
 
         let granularity = timeframe.trendGranularity
         var trendMap = Dictionary(uniqueKeysWithValues: snapshot.trendSeries.map { ($0.bucketStart, $0.count) })
+        let trendStartDate = startDate.map {
+            TimeBucket.start(of: $0, granularity: granularity, calendar: .current)
+        }
 
         for event in filteredEvents {
             let bucket = TimeBucket.start(of: event.timestamp, granularity: granularity)
@@ -327,7 +350,8 @@ public actor MetricsEngine {
             activeFlowByBucket: pendingActiveFlowByBucket,
             activeSkillByBucket: pendingActiveSkillByBucket,
             granularity: granularity,
-            startDate: startDate
+            startDate: trendStartDate,
+            endDate: now
         )
 
         return snapshot
@@ -353,9 +377,6 @@ public actor MetricsEngine {
                 if let session = sessions[appID] {
                     let bucket = TimeBucket.start(of: session.lastTextEventTime, granularity: .fiveMinutes)
                     pendingTypedWordsByBucket[bucket, default: 0] += 1
-                    var updatedSession = session
-                    updatedSession.typedWords += 1
-                    sessions[appID] = updatedSession
 
                     pendingWordIncrements.append(
                         WordIncrement(
@@ -384,7 +405,7 @@ public actor MetricsEngine {
 
     // MARK: - Text Event Processing
 
-    private func processTextEvent(appID: String, event: KeyEvent, isDelete: Bool, isPaste: Bool) {
+    private func processTextEvent(appID: String, event: KeyEvent) {
         guard let lastMono = lastTextEventMonotonic[appID],
               let lastWall = lastTextEventWallClock[appID] else {
             // First text event in this session
@@ -409,9 +430,6 @@ public actor MetricsEngine {
         let flowDelta = min(dt, config.idleCapFlow)
         // Skill active time: min(dt, idle_cap_skill)
         let skillDelta = min(dt, config.idleCapSkill)
-
-        sessions[appID]?.activeSecondsFlow += flowDelta
-        sessions[appID]?.activeSecondsSkill += skillDelta
 
         // Split across hour boundaries for bucket assignment
         let startWall = lastWall
@@ -535,12 +553,14 @@ public actor MetricsEngine {
         activeFlowByBucket: [Date: Double],
         activeSkillByBucket: [Date: Double],
         granularity: TimeBucketGranularity,
-        startDate: Date?
+        startDate: Date?,
+        endDate: Date
     ) -> [TypingSpeedTrendPoint] {
         var wordsByBucket: [Date: Int] = [:]
         var secondsByBucket: [Date: Double] = [:]
         var flowByBucket: [Date: Double] = [:]
         var skillByBucket: [Date: Double] = [:]
+        let endBucketDate = TimeBucket.start(of: endDate, granularity: granularity)
 
         for point in existing {
             wordsByBucket[point.bucketStart] = point.words
@@ -551,23 +571,27 @@ public actor MetricsEngine {
 
         for increment in wordIncrements {
             let bucket = TimeBucket.start(of: increment.timestamp, granularity: granularity)
+            guard bucket <= endBucketDate else { continue }
             wordsByBucket[bucket, default: 0] += 1
         }
 
         for (hourBucket, seconds) in activeTypingByBucket {
             if let startDate, hourBucket < startDate { continue }
+            if hourBucket > endBucketDate { continue }
             let bucket = TimeBucket.start(of: hourBucket, granularity: granularity)
             secondsByBucket[bucket, default: 0] += seconds
         }
 
         for (hourBucket, seconds) in activeFlowByBucket {
             if let startDate, hourBucket < startDate { continue }
+            if hourBucket > endBucketDate { continue }
             let bucket = TimeBucket.start(of: hourBucket, granularity: granularity)
             flowByBucket[bucket, default: 0] += seconds
         }
 
         for (hourBucket, seconds) in activeSkillByBucket {
             if let startDate, hourBucket < startDate { continue }
+            if hourBucket > endBucketDate { continue }
             let bucket = TimeBucket.start(of: hourBucket, granularity: granularity)
             skillByBucket[bucket, default: 0] += seconds
         }
@@ -644,9 +668,8 @@ public actor MetricsEngine {
     }
 
     private func shouldCountEventInWordStats(_ event: KeyEvent) -> Bool {
-        guard event.isTextProducing else {
-            return true
-        }
+        guard event.isTextProducing else { return false }
+
         return !shouldSuppressWordCounting(
             bundleID: event.appBundleID,
             appName: event.appName
@@ -719,21 +742,35 @@ public actor MetricsEngine {
         }
     }
 
-    private func bucketedIntSum(_ valuesByBucket: [Date: Int], from startDate: Date?) -> Int {
-        guard let startDate else { return valuesByBucket.values.reduce(0, +) }
+    private func bucketedIntSum(_ valuesByBucket: [Date: Int], from startDate: Date?, to endDate: Date) -> Int {
+        let endBucket = TimeBucket.start(of: endDate, granularity: .fiveMinutes)
+        guard let startDate else {
+            return valuesByBucket.reduce(into: 0) { total, entry in
+                if entry.key <= endBucket {
+                    total += entry.value
+                }
+            }
+        }
 
         return valuesByBucket.reduce(into: 0) { total, entry in
-            if entry.key >= startDate {
+            if entry.key >= startDate && entry.key <= endBucket {
                 total += entry.value
             }
         }
     }
 
-    private func bucketedDoubleSum(_ valuesByBucket: [Date: Double], from startDate: Date?) -> Double {
-        guard let startDate else { return valuesByBucket.values.reduce(0, +) }
+    private func bucketedDoubleSum(_ valuesByBucket: [Date: Double], from startDate: Date?, to endDate: Date) -> Double {
+        let endBucket = TimeBucket.start(of: endDate, granularity: .fiveMinutes)
+        guard let startDate else {
+            return valuesByBucket.reduce(into: 0.0) { total, entry in
+                if entry.key <= endBucket {
+                    total += entry.value
+                }
+            }
+        }
 
         return valuesByBucket.reduce(into: 0.0) { total, entry in
-            if entry.key >= startDate {
+            if entry.key >= startDate && entry.key <= endBucket {
                 total += entry.value
             }
         }

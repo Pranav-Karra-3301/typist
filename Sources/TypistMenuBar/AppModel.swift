@@ -67,7 +67,6 @@ final class AppModel: ObservableObject {
         static let statusTextMetric = "typist.statusTextMetric"
         static let statusIconMonochrome = "typist.statusIconMonochrome"
         static let showHeatmapInPopover = "typist.showHeatmapInPopover"
-        static let showDiagnosticsInPopover = "typist.showDiagnosticsInPopover"
         static let hasShownUnsignedInstallNotice = "typist.hasShownUnsignedInstallNotice"
         static let didDismissUnsignedInstallNotice = "typist.didDismissUnsignedInstallNotice"
         static let autoCheckUpdates = "typist.autoCheckUpdates"
@@ -136,12 +135,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    @Published var showDiagnosticsInPopover: Bool {
-        didSet {
-            defaults.set(showDiagnosticsInPopover, forKey: DefaultsKey.showDiagnosticsInPopover)
-        }
-    }
-
     @Published var autoCheckUpdates: Bool {
         didSet {
             defaults.set(autoCheckUpdates, forKey: DefaultsKey.autoCheckUpdates)
@@ -201,7 +194,6 @@ final class AppModel: ObservableObject {
         self.statusTextMetric = StatusTextMetric(rawValue: defaults.string(forKey: DefaultsKey.statusTextMetric) ?? "") ?? .keystrokes
         self.statusIconMonochrome = Self.boolDefault(forKey: DefaultsKey.statusIconMonochrome, defaults: defaults, defaultValue: true)
         self.showHeatmapInPopover = Self.boolDefault(forKey: DefaultsKey.showHeatmapInPopover, defaults: defaults, defaultValue: true)
-        self.showDiagnosticsInPopover = Self.boolDefault(forKey: DefaultsKey.showDiagnosticsInPopover, defaults: defaults, defaultValue: true)
         self.autoCheckUpdates = Self.boolDefault(forKey: DefaultsKey.autoCheckUpdates, defaults: defaults, defaultValue: true)
         self.showUnsignedInstallNotice = Self.shouldDisplayUnsignedInstallNotice(defaults: defaults)
         self.lastUpdateCheckDate = defaults.object(forKey: DefaultsKey.lastUpdateCheckAt) as? Date
@@ -679,6 +671,10 @@ final class AppModel: ObservableObject {
 
     private static func shouldDisplayUnsignedInstallNotice(defaults: UserDefaults) -> Bool {
         guard !defaults.bool(forKey: DefaultsKey.didDismissUnsignedInstallNotice) else {
+            return false
+        }
+
+        guard !defaults.bool(forKey: DefaultsKey.hasShownUnsignedInstallNotice) else {
             return false
         }
 

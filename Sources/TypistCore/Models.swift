@@ -219,17 +219,8 @@ public struct SessionConfig: Sendable {
 public struct TypingSession: Sendable {
     public let appBundleID: String
     public let appName: String
-    public var sessionStart: Date
     public var lastTextEventTime: Date
     public var lastMonotonicTime: TimeInterval
-    public var typedWords: Int
-    public var pastedWordsEst: Int
-    public var pasteEvents: Int
-    public var editEvents: Int
-    public var activeSecondsFlow: Double
-    public var activeSecondsSkill: Double
-    public var inWord: Bool
-    public var wordHasChars: Bool
 
     public init(
         appBundleID: String,
@@ -239,17 +230,8 @@ public struct TypingSession: Sendable {
     ) {
         self.appBundleID = appBundleID
         self.appName = appName
-        self.sessionStart = startTime
         self.lastTextEventTime = startTime
         self.lastMonotonicTime = monotonicTime
-        self.typedWords = 0
-        self.pastedWordsEst = 0
-        self.pasteEvents = 0
-        self.editEvents = 0
-        self.activeSecondsFlow = 0
-        self.activeSecondsSkill = 0
-        self.inWord = false
-        self.wordHasChars = false
     }
 }
 
