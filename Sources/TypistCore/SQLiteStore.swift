@@ -474,21 +474,39 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         let startBucketTimestamp = startDate.map {
             Int64(TimeBucket.start(of: $0, granularity: granularity, calendar: calendar).timeIntervalSince1970)
         }
+        let endTimestamp = Int64(now.timeIntervalSince1970)
+        let endBucketTimestamp = Int64(TimeBucket.start(of: now, granularity: granularity, calendar: calendar).timeIntervalSince1970)
 
         let keyCodePredicate = "key_code >= \(keyRange.lowerBound) AND key_code <= \(keyRange.upperBound)"
-        let eventFilterClause = startTimestamp == nil
-            ? " WHERE \(keyCodePredicate)"
-            : " WHERE ts >= ? AND \(keyCodePredicate)"
-        let eventBindings = startTimestamp.map { [SQLiteBinding.int64($0)] } ?? []
+        let eventFilterClause: String
+        let eventBindings: [SQLiteBinding]
+        if let startTimestamp {
+            eventFilterClause = " WHERE ts >= ? AND ts <= ? AND \(keyCodePredicate)"
+            eventBindings = [.int64(startTimestamp), .int64(endTimestamp)]
+        } else {
+            eventFilterClause = " WHERE ts <= ? AND \(keyCodePredicate)"
+            eventBindings = [.int64(endTimestamp)]
+        }
 
-        let aggregateFilterClause = startBucketTimestamp == nil ? "" : " WHERE bucket_start >= ?"
-        let aggregateBindings = startBucketTimestamp.map { [SQLiteBinding.int64($0)] } ?? []
+        let aggregateFilterClause: String
+        let aggregateBindings: [SQLiteBinding]
+        if let startBucketTimestamp {
+            aggregateFilterClause = " WHERE bucket_start >= ? AND bucket_start <= ?"
+            aggregateBindings = [.int64(startBucketTimestamp), .int64(endBucketTimestamp)]
+        } else {
+            aggregateFilterClause = " WHERE bucket_start <= ?"
+            aggregateBindings = [.int64(endBucketTimestamp)]
+        }
 
         let totalKeys = try querySingleInt(
             "SELECT COUNT(*) FROM event_ring_buffer\(eventFilterClause);",
             bindings: eventBindings
         )
-        let totalWords = try wordCountFromEventRing(startTimestamp: startTimestamp, keyCodeRange: keyRange)
+        let totalWords = try wordCountFromEventRing(
+            startTimestamp: startTimestamp,
+            endTimestamp: endTimestamp,
+            keyCodeRange: keyRange
+        )
 
         let breakdownRows = try queryRows(
             "SELECT device_class, COUNT(*) FROM event_ring_buffer\(eventFilterClause) GROUP BY device_class;",
@@ -780,7 +798,11 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
         )
     }
 
-    private func wordCountFromEventRing(startTimestamp: Int64?, keyCodeRange: ClosedRange<Int>) throws -> Int {
+    private func wordCountFromEventRing(
+        startTimestamp: Int64?,
+        endTimestamp: Int64,
+        keyCodeRange: ClosedRange<Int>
+    ) throws -> Int {
         var inWord = false
         if let startTimestamp {
             let priorRows = try queryRows(
@@ -806,22 +828,22 @@ public final class SQLiteStore: TypistStore, @unchecked Sendable {
                 """
                 SELECT key_code
                 FROM event_ring_buffer
-                WHERE ts >= ? AND key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
+                WHERE ts >= ? AND ts <= ? AND key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
                   AND is_counted_for_word_stats = 1
                 ORDER BY ts ASC, rowid ASC;
                 """,
-                bindings: [.int64(startTimestamp)]
+                bindings: [.int64(startTimestamp), .int64(endTimestamp)]
             )
         } else {
             eventRows = try queryRows(
                 """
                 SELECT key_code
                 FROM event_ring_buffer
-                WHERE key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
+                WHERE ts <= ? AND key_code >= \(keyCodeRange.lowerBound) AND key_code <= \(keyCodeRange.upperBound)
                   AND is_counted_for_word_stats = 1
                 ORDER BY ts ASC, rowid ASC;
                 """,
-                bindings: []
+                bindings: [.int64(endTimestamp)]
             )
         }
 

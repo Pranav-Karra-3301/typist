@@ -10,25 +10,50 @@ enum StatusIconRenderer {
             size: size,
             tintColor: iconColor
         ) else {
-            return fallbackIcon()
+            return fallbackIcon(size: size)
         }
         return image
     }
 
     static func monochromeIcon(for style: StatusIconStyle, size: CGFloat = 16, isTemplate: Bool = true) -> NSImage? {
         guard let image = StatusIconTemplateDrawer.image(for: style, size: size, tintColor: iconColor) else {
-            return fallbackIcon(isTemplate: isTemplate)
+            return fallbackIcon(size: size, isTemplate: isTemplate)
         }
         image.isTemplate = isTemplate
         return image
     }
 
-    private static func fallbackIcon(isTemplate: Bool = true) -> NSImage? {
-        if let image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Typist") {
-            image.isTemplate = isTemplate
-            return image
+    private static func fallbackIcon(size: CGFloat, isTemplate: Bool = true) -> NSImage? {
+        let image = NSImage(size: NSSize(width: size, height: size))
+        image.lockFocus()
+        defer { image.unlockFocus() }
+
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            return nil
         }
-        return nil
+
+        context.setStrokeColor(iconColor.cgColor)
+        context.setLineWidth(size * 0.10)
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+
+        let inset = size * 0.12
+        let glyphRect = CGRect(
+            x: inset,
+            y: inset,
+            width: size - (2 * inset),
+            height: size - (2 * inset)
+        )
+        context.stroke(glyphRect)
+
+        context.move(to: CGPoint(x: glyphRect.midX, y: glyphRect.minY))
+        context.addLine(to: CGPoint(x: glyphRect.midX, y: glyphRect.maxY))
+        context.move(to: CGPoint(x: glyphRect.minX + (glyphRect.width * 0.17), y: glyphRect.midY))
+        context.addLine(to: CGPoint(x: glyphRect.maxX - (glyphRect.width * 0.17), y: glyphRect.midY))
+        context.strokePath()
+
+        image.isTemplate = isTemplate
+        return image
     }
 }
 

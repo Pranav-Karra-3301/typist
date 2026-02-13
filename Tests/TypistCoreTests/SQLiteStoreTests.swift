@@ -119,6 +119,41 @@ final class SQLiteStoreTests: XCTestCase {
         XCTAssertEqual(oneHour.totalWords, 1)
     }
 
+    func testSnapshotBoundsExcludesFutureRowsInOneHourWindow() async throws {
+        let dbURL = makeDatabaseURL(testName: #function)
+        let store = try SQLiteStore(databaseURL: dbURL, retentionDays: 10_000)
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let events: [KeyEvent] = [
+            KeyEvent(timestamp: now.addingTimeInterval(-50 * 60), keyCode: 4, isSeparator: false, deviceClass: .builtIn),
+            KeyEvent(timestamp: now.addingTimeInterval(-49 * 60), keyCode: 44, isSeparator: true, deviceClass: .builtIn),
+            KeyEvent(timestamp: now.addingTimeInterval(10 * 60), keyCode: 5, isSeparator: false, deviceClass: .builtIn),
+            KeyEvent(timestamp: now.addingTimeInterval(10 * 60 + 1), keyCode: 44, isSeparator: true, deviceClass: .builtIn)
+        ]
+
+        let words: [WordIncrement] = [
+            WordIncrement(timestamp: now.addingTimeInterval(-49 * 60), deviceClass: .builtIn),
+            WordIncrement(timestamp: now.addingTimeInterval(10 * 60), deviceClass: .builtIn)
+        ]
+
+        let activeIncrements: [ActiveTypingIncrement] = [
+            ActiveTypingIncrement(
+                bucketStart: now.addingTimeInterval(-49 * 60),
+                activeSeconds: 30,
+                activeSecondsFlow: 30,
+                activeSecondsSkill: 15
+            )
+        ]
+
+        try await store.flush(events: events, wordIncrements: words, activeTypingIncrements: activeIncrements)
+
+        let oneHour = try await store.snapshot(for: .h1, now: now)
+        XCTAssertEqual(oneHour.totalKeystrokes, 2)
+        XCTAssertEqual(oneHour.totalWords, 1)
+        XCTAssertEqual(oneHour.wpmTrendSeries.filter { $0.words > 0 }.count, 1)
+        XCTAssertEqual(oneHour.typingSpeedTrendSeries.filter { $0.flowWPM > 0 }.count, 1)
+    }
+
     func testSnapshotIncludesWPMTrendAndTopAppsByWords() async throws {
         let dbURL = makeDatabaseURL(testName: #function)
         let store = try SQLiteStore(databaseURL: dbURL, retentionDays: 10_000)

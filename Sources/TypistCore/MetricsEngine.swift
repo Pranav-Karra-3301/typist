@@ -40,7 +40,9 @@ public actor MetricsEngine {
     private var lastFlushError: String?
     private let ignoredWordCountBundleSuffixes: Set<String> = [
         "wispr",
+        "superwispr",
         "superwhisper",
+        "wisprflow",
         "dictation"
     ]
     private let ignoredWordCountAppNameFragments: Set<String> = [
@@ -50,7 +52,9 @@ public actor MetricsEngine {
         "wispr flow",
         "dictation",
         "voice dictation",
-        "speech"
+        "speech to text",
+        "voice input",
+        "whisper flow"
     ]
 
     public init(
@@ -650,22 +654,58 @@ public actor MetricsEngine {
     }
 
     private func shouldSuppressWordCounting(bundleID: String?, appName: String?) -> Bool {
-        let normalizedBundleID = (bundleID ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let normalizedAppName = (appName ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
+        let normalizedBundleID = normalizeForSuppression(bundleID)
+        let normalizedAppName = normalizeForSuppression(appName)
 
-        if ignoredWordCountBundleSuffixes.contains(where: { ignored in
-            normalizedBundleID.contains(ignored)
-        }) {
+        if hasSuppressionMatch(
+            source: normalizedBundleID,
+            compactSource: normalizedBundleID.replacingOccurrences(of: " ", with: ""),
+            ignored: ignoredWordCountBundleSuffixes
+        ) {
             return true
         }
 
-        return ignoredWordCountAppNameFragments.contains(where: { ignored in
-            normalizedAppName.contains(ignored)
-        })
+        return hasSuppressionMatch(
+            source: normalizedAppName,
+            compactSource: normalizedAppName.replacingOccurrences(of: " ", with: ""),
+            ignored: ignoredWordCountAppNameFragments
+        )
+    }
+
+    private func normalizeForSuppression(_ value: String?) -> String {
+        guard let value else { return "" }
+
+        let lowered = value.lowercased()
+        let alphaNumericAndSpace = lowered.replacingOccurrences(
+            of: "[^a-z0-9]+",
+            with: " ",
+            options: .regularExpression
+        )
+
+        return alphaNumericAndSpace
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+    }
+
+    private func hasSuppressionMatch(
+        source: String,
+        compactSource: String,
+        ignored: Set<String>
+    ) -> Bool {
+        guard !source.isEmpty else { return false }
+
+        for token in ignored where !token.isEmpty {
+            if source.contains(token) {
+                return true
+            }
+
+            let compactToken = token.replacingOccurrences(of: " ", with: "")
+            if !compactToken.isEmpty && compactSource.contains(compactToken) {
+                return true
+            }
+        }
+
+        return false
     }
 
     private func clearWordCountState(for appID: String, event: KeyEvent) {

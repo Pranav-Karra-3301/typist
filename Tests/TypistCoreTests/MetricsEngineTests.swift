@@ -184,6 +184,71 @@ final class MetricsEngineTests: XCTestCase {
         XCTAssertEqual(snapshot.totalKeystrokes, 4)
     }
 
+    func testSuppressedSourcesMatchWhitespaceAndPunctuationVariants() async throws {
+        let store = MockStore()
+        let engine = MetricsEngine(store: store, queryService: store, flushInterval: .seconds(60), flushThreshold: 200)
+
+        await engine.start()
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let cases = [
+            ("com.super-whisper.app", "Super-Whisper"),
+            ("com.super_wisper.app", "SUPER WISPR"),
+            ("com.voice input.dictation", "Voice Dictation (Beta)")
+        ]
+
+        for (offset, suppressedCase) in cases.enumerated() {
+            let base = now - Double(offset * 4)
+            let keyDown = KeyEvent(
+                timestamp: base,
+                keyCode: 4,
+                isSeparator: false,
+                deviceClass: .builtIn,
+                appBundleID: suppressedCase.0,
+                appName: suppressedCase.1,
+                monotonicTime: TimeInterval(offset)
+            )
+            let separator = KeyEvent(
+                timestamp: base + 1,
+                keyCode: 44,
+                isSeparator: true,
+                deviceClass: .builtIn,
+                appBundleID: suppressedCase.0,
+                appName: suppressedCase.1,
+                monotonicTime: TimeInterval(offset + 1)
+            )
+            await engine.ingest(keyDown)
+            await engine.ingest(separator)
+        }
+
+        let normalKeystroke = KeyEvent(
+            timestamp: now,
+            keyCode: 4,
+            isSeparator: false,
+            deviceClass: .builtIn,
+            appBundleID: "com.apple.TextEdit",
+            appName: "TextEdit",
+            monotonicTime: 100
+        )
+        let normalSeparator = KeyEvent(
+            timestamp: now + 1,
+            keyCode: 44,
+            isSeparator: true,
+            deviceClass: .builtIn,
+            appBundleID: "com.apple.TextEdit",
+            appName: "TextEdit",
+            monotonicTime: 101
+        )
+        await engine.ingest(normalKeystroke)
+        await engine.ingest(normalSeparator)
+
+        let snapshot = try await engine.snapshot(for: .h1, now: now + 2)
+
+        XCTAssertEqual(snapshot.totalKeystrokes, 8)
+        XCTAssertEqual(snapshot.totalWords, 1)
+        XCTAssertEqual(snapshot.typedWords, 1)
+    }
+
     func testSuppressedDictationStreamDoesNotAffectWordOrFlowCounts() async throws {
         let store = MockStore()
         let engine = MetricsEngine(
