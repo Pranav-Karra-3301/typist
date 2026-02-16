@@ -155,6 +155,8 @@ final class AppModel: ObservableObject {
     private var captureTask: Task<Void, Never>?
     private var popoverRefreshTask: Task<Void, Never>?
     private var statusRefreshTask: Task<Void, Never>?
+    private var workspaceObserverTokens: [NSObjectProtocol] = []
+    private var lastCaptureRestartAt: Date?
     private var snapshotRefreshCount = 0
     private var latestStatusKeystrokes = 0
     private var latestStatusWords = 0
@@ -214,6 +216,7 @@ final class AppModel: ObservableObject {
 
     func start() async {
         diagnostics.mark("AppModel start")
+        registerWorkspaceObserversIfNeeded()
         permissionGranted = PermissionsService.hasInputMonitoringPermission()
 
         if permissionGranted {
@@ -238,8 +241,8 @@ final class AppModel: ObservableObject {
 
     func shutdown() async {
         diagnostics.mark("AppModel shutdown")
-        captureTask?.cancel()
-        captureTask = nil
+        unregisterWorkspaceObservers()
+        await stopCapturePipeline()
 
         popoverRefreshTask?.cancel()
         popoverRefreshTask = nil
@@ -247,7 +250,6 @@ final class AppModel: ObservableObject {
         statusRefreshTask?.cancel()
         statusRefreshTask = nil
 
-        captureService.stop()
         await metricsEngine.stop()
         await refreshDiagnostics()
     }
@@ -418,12 +420,73 @@ final class AppModel: ObservableObject {
             return
         }
 
+        startCaptureEventPump()
+    }
+
+    private func startCaptureEventPump() {
         captureTask = Task(priority: .high) { [diagnostics, metricsEngine, captureService] in
             for await event in captureService.events {
                 diagnostics.recordAppReceivedEvent(event)
                 await metricsEngine.ingest(event)
             }
         }
+    }
+
+    private func stopCapturePipeline() async {
+        captureTask?.cancel()
+        captureTask = nil
+        captureService.stop()
+        captureRunning = false
+    }
+
+    private func restartCapturePipelineIfNeeded(reason: String) async {
+        guard permissionGranted else { return }
+
+        let now = Date()
+        if let lastCaptureRestartAt, now.timeIntervalSince(lastCaptureRestartAt) < 15 {
+            return
+        }
+        lastCaptureRestartAt = now
+
+        diagnostics.mark("Restarting capture pipeline (\(reason))")
+        await stopCapturePipeline()
+        await startCapture()
+    }
+
+    private func registerWorkspaceObserversIfNeeded() {
+        guard workspaceObserverTokens.isEmpty else { return }
+
+        let center = NSWorkspace.shared.notificationCenter
+        let names: [NSNotification.Name] = [
+            NSWorkspace.didWakeNotification,
+            NSWorkspace.sessionDidBecomeActiveNotification
+        ]
+
+        for name in names {
+            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                guard let self else { return }
+                Task { @MainActor in
+                    await self.handleCaptureRecoveryTrigger(reason: name.rawValue)
+                }
+            }
+            workspaceObserverTokens.append(token)
+        }
+    }
+
+    private func unregisterWorkspaceObservers() {
+        guard !workspaceObserverTokens.isEmpty else { return }
+
+        let center = NSWorkspace.shared.notificationCenter
+        for token in workspaceObserverTokens {
+            center.removeObserver(token)
+        }
+        workspaceObserverTokens.removeAll()
+    }
+
+    private func handleCaptureRecoveryTrigger(reason: String) async {
+        await refreshPermissionAndCaptureState()
+        guard permissionGranted else { return }
+        await restartCapturePipelineIfNeeded(reason: reason)
     }
 
     private func refreshSelectedTimeframe() async {
@@ -508,18 +571,18 @@ final class AppModel: ObservableObject {
         permissionGranted = hasPermission
 
         if hasPermission {
-            if !captureRunning {
+            if !captureRunning || captureTask == nil {
                 await startCapture()
             }
             if captureRunning {
                 statusMessage = "Input monitoring enabled"
             }
         } else {
-            if captureRunning {
-                statusMessage = "Capture running. If counts stop, re-enable Input Monitoring in System Settings."
-            } else {
-                statusMessage = "Input monitoring permission required"
+            if captureRunning || captureTask != nil {
+                diagnostics.mark("Stopping capture pipeline due to missing Input Monitoring permission")
+                await stopCapturePipeline()
             }
+            statusMessage = "Input monitoring permission required"
         }
         await refreshDiagnostics()
     }
@@ -533,6 +596,13 @@ final class AppModel: ObservableObject {
             "hid=\(appSnapshot.hidCallbacks) yielded=\(appSnapshot.hidYieldedEvents) " +
             "app=\(appSnapshot.appReceivedEvents) engIn=\(engineDiagnostics.totalIngestedEvents) " +
             "pending=\(engineDiagnostics.pendingEvents) flushed=\(engineDiagnostics.totalFlushedEvents)"
+
+        if let lastIngestAt = engineDiagnostics.lastIngestAt {
+            let secondsSinceLastIngest = max(0, Int(Date().timeIntervalSince(lastIngestAt)))
+            debugSummary += " lastIn=\(secondsSinceLastIngest)s"
+        } else {
+            debugSummary += " lastIn=never"
+        }
 
         if let flushError = engineDiagnostics.lastFlushError, !flushError.isEmpty {
             debugSummary += " flushErr=\(flushError)"
