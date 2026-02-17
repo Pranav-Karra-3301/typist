@@ -34,16 +34,14 @@ Optional Apple signing/notarization secrets (only needed if you later enroll in 
 Without Apple Developer signing credentials:
 
 - Release workflow publishes an **unsigned DMG**.
-- Release app bundles are intentionally **not ad-hoc signed** (`APP_ADHOC_SIGN=0`) to avoid changing cdhash identity every build.
-- Unsigned build path also strips linker-added ad-hoc signatures from the executable.
+- Unsigned beta releases are ad-hoc signed (`APP_ADHOC_SIGN=1`) for reliable launch from Finder/LaunchServices.
 - Homebrew cask updates still work and point to that DMG.
 - Homebrew does **not** add notarization/trust metadata.
 
 Why this matters:
 
-- Ad-hoc signatures are tied to build-specific cdhash values.
-- For privacy permissions like Input Monitoring, changing code identity can force users to re-grant access after updates.
-- For the best long-term consistency, use Developer ID signing + notarization.
+- Ad-hoc signatures are tied to build-specific cdhash values, so privacy permissions like Input Monitoring may still require re-granting after some updates.
+- For best long-term consistency, use Developer ID signing + notarization.
 
 If macOS blocks launch, users can:
 

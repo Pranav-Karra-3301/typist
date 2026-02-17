@@ -13,10 +13,10 @@ icon_source="${APP_ICON_SOURCE:-scripts/release/assets/app-icon.png}"
 icon_name="AppIcon"
 round_icon="${APP_ICON_ROUND_CORNERS:-1}"
 icon_corner_radius="${APP_ICON_CORNER_RADIUS:-0.22}"
-# Keep unsigned by default for non-Developer-ID releases.
-# Ad-hoc signing changes the designated requirement (cdhash) every build,
-# which can cause macOS TCC (Input Monitoring) to treat updates as a new app.
-adhoc_sign="${APP_ADHOC_SIGN:-0}"
+# Ad-hoc signing is required for reliable LaunchServices/Finder launch in
+# unsigned beta distribution. For strongest permission stability across updates,
+# use Developer ID signing + notarization.
+adhoc_sign="${APP_ADHOC_SIGN:-1}"
 update_repo="${SOURCE_REPO:-pranavkarra/typist}"
 releases_url="${TYPIST_RELEASES_URL:-https://github.com/$update_repo/releases}"
 
@@ -108,11 +108,6 @@ EOF
 
 if [[ "$adhoc_sign" == "1" ]]; then
   codesign --force --deep --sign - "$app_bundle"
-else
-  # Swift release binaries can be linker-signed ad-hoc by default.
-  # Strip signatures entirely in unsigned builds to avoid cdhash-based identity churn.
-  codesign --remove-signature "$macos_dir/$app_name" >/dev/null 2>&1 || true
-  codesign --remove-signature "$app_bundle" >/dev/null 2>&1 || true
 fi
 
 echo "Built app bundle at $app_bundle"

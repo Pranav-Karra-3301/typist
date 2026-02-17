@@ -27,7 +27,7 @@ Direct download:
 Unsigned build notice:
 
 - Current public beta releases are unsigned/unnotarized.
-- Unsigned releases are intentionally **not ad-hoc signed** (including stripping linker-added ad-hoc signatures) so app identity stays more stable between updates.
+- Unsigned beta releases are ad-hoc signed for reliable launch from Finder/LaunchServices.
 - If macOS blocks launch, right-click `Typist.app` and choose **Open**.
 - Terminal fallback:
   ```bash

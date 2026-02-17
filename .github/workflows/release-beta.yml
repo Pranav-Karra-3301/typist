@@ -27,7 +27,7 @@ jobs:
       APP_BUNDLE_ID: ${{ vars.APP_BUNDLE_ID }}
       APP_NAME: Typist
       APP_EXECUTABLE: TypistMenuBar
-      APP_ADHOC_SIGN: "0"
+      APP_ADHOC_SIGN: "1"
       BASE_BETA_VERSION: 0.1.0
       TAP_REPO: ${{ vars.TAP_REPO }}
       TAP_DEFAULT_BRANCH: ${{ vars.TAP_DEFAULT_BRANCH }}
