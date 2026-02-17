@@ -61,6 +61,7 @@ struct StatusItemState {
 final class AppModel: ObservableObject {
     private enum DefaultsKey {
         static let didAttemptPermissionPrompt = "typist.didAttemptPermissionPrompt"
+        static let lastPermissionPromptAt = "typist.lastPermissionPromptAt"
         static let selectedTimeframe = "typist.selectedTimeframe"
         static let statusIconStyle = "typist.statusIconStyle"
         static let showStatusTextCount = "typist.showStatusTextCount"
@@ -424,10 +425,23 @@ final class AppModel: ObservableObject {
     }
 
     private func startCaptureEventPump() {
-        captureTask = Task(priority: .high) { [diagnostics, metricsEngine, captureService] in
+        captureTask = Task(priority: .high) { [weak self, diagnostics, metricsEngine, captureService] in
             for await event in captureService.events {
                 diagnostics.recordAppReceivedEvent(event)
                 await metricsEngine.ingest(event)
+            }
+
+            guard let self else { return }
+            let wasCancelled = Task.isCancelled
+            await MainActor.run {
+                self.captureTask = nil
+                self.captureRunning = false
+                if !wasCancelled {
+                    diagnostics.mark("Capture event stream ended unexpectedly")
+                    Task { @MainActor in
+                        await self.restartCapturePipelineIfNeeded(reason: "stream-ended")
+                    }
+                }
             }
         }
     }
@@ -489,6 +503,24 @@ final class AppModel: ObservableObject {
         await restartCapturePipelineIfNeeded(reason: reason)
     }
 
+    private func ensureCapturePipelineHealthy() async {
+        guard captureRunning, permissionGranted else { return }
+
+        let engineDiagnostics = await metricsEngine.diagnostics()
+        guard engineDiagnostics.totalIngestedEvents > 0, let lastIngestAt = engineDiagnostics.lastIngestAt else {
+            return
+        }
+
+        let staleSeconds = Date().timeIntervalSince(lastIngestAt)
+        guard staleSeconds >= 15 * 60 else { return }
+
+        if let lastCaptureRestartAt, lastCaptureRestartAt > lastIngestAt {
+            return
+        }
+
+        await restartCapturePipelineIfNeeded(reason: "stale-ingest-\(Int(staleSeconds))s")
+    }
+
     private func refreshSelectedTimeframe() async {
         await refreshSelectedTimeframe(for: selectedTimeframe)
     }
@@ -513,7 +545,10 @@ final class AppModel: ObservableObject {
         statusRefreshTask?.cancel()
         statusRefreshTask = Task {
             while !Task.isCancelled {
+                await refreshPermissionAndCaptureState()
+                await ensureCapturePipelineHealthy()
                 await refreshStatusItemCounts()
+                await refreshSelectedTimeframe()
                 try? await Task.sleep(for: .seconds(60))
             }
         }
@@ -553,8 +588,20 @@ final class AppModel: ObservableObject {
     }
 
     private func requestPermissionIfFirstLaunch() async {
-        guard !defaults.bool(forKey: DefaultsKey.didAttemptPermissionPrompt) else { return }
+        let now = Date()
+        if let lastPromptAt = defaults.object(forKey: DefaultsKey.lastPermissionPromptAt) as? Date,
+           now.timeIntervalSince(lastPromptAt) < 12 * 3600 {
+            await refreshPermissionAndCaptureState()
+            if permissionGranted {
+                statusMessage = "Input monitoring enabled"
+            } else {
+                statusMessage = "Permission required. Use Enable Input Monitoring or Open Settings."
+            }
+            return
+        }
+
         defaults.set(true, forKey: DefaultsKey.didAttemptPermissionPrompt)
+        defaults.set(now, forKey: DefaultsKey.lastPermissionPromptAt)
 
         _ = PermissionsService.requestInputMonitoringPermission()
         await refreshPermissionAndCaptureState()

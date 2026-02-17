@@ -27,6 +27,7 @@ Direct download:
 Unsigned build notice:
 
 - Current public beta releases are unsigned/unnotarized.
+- Unsigned releases are intentionally **not ad-hoc signed** so app identity stays more stable between updates (helps preserve previously granted Input Monitoring permission).
 - If macOS blocks launch, right-click `Typist.app` and choose **Open**.
 - Terminal fallback:
   ```bash
@@ -43,6 +44,8 @@ swift run TypistMenuBar
 On first run, grant **Input Monitoring** in System Settings when prompted.
 If no prompt appears, use the in-app **Open Settings** button and enable Typist manually under:
 `System Settings > Privacy & Security > Input Monitoring`.
+
+For strongest permission stability across updates, use a Developer ID signed/notarized build.
 
 ## Test
 
