@@ -35,6 +35,7 @@ Without Apple Developer signing credentials:
 
 - Release workflow publishes an **unsigned DMG**.
 - Release app bundles are intentionally **not ad-hoc signed** (`APP_ADHOC_SIGN=0`) to avoid changing cdhash identity every build.
+- Unsigned build path also strips linker-added ad-hoc signatures from the executable.
 - Homebrew cask updates still work and point to that DMG.
 - Homebrew does **not** add notarization/trust metadata.
 

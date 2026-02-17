@@ -108,6 +108,11 @@ EOF
 
 if [[ "$adhoc_sign" == "1" ]]; then
   codesign --force --deep --sign - "$app_bundle"
+else
+  # Swift release binaries can be linker-signed ad-hoc by default.
+  # Strip signatures entirely in unsigned builds to avoid cdhash-based identity churn.
+  codesign --remove-signature "$macos_dir/$app_name" >/dev/null 2>&1 || true
+  codesign --remove-signature "$app_bundle" >/dev/null 2>&1 || true
 fi
 
 echo "Built app bundle at $app_bundle"
